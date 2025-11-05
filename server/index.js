@@ -1,5 +1,3 @@
-// Minimal AurisVoice Backend
-// This TypeScript file wraps the JavaScript implementation for compatibility
 import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';

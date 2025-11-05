@@ -1,0 +1,33 @@
+{
+  "name": "aurisvoice-backend",
+  "version": "1.0.0",
+  "description": "Minimal Node.js backend for AurisVoice AI voice dubbing SaaS",
+  "type": "module",
+  "main": "server/index.js",
+  "scripts": {
+    "dev": "nodemon server/index.js",
+    "start": "node server/index.js"
+  },
+  "keywords": [
+    "voice",
+    "dubbing",
+    "ai",
+    "openai",
+    "elevenlabs",
+    "backend",
+    "api"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.5",
+    "express": "^4.21.2"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.9"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
