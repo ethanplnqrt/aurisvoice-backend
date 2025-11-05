@@ -1,40 +1,44 @@
 # AurisVoice Backend
 
 ## Overview
-AurisVoice is a minimal Node.js backend API for a premium AI voice dubbing SaaS platform. This is a clean, lightweight Express server optimized for GitHub integration and import into Cursor IDE.
+AurisVoice is a minimal, production-ready Node.js backend for a premium AI voice dubbing SaaS platform. Pure JavaScript, clean architecture, optimized for GitHub and Cursor IDE.
 
 ## Project Information
 - **Type**: Backend API only (no frontend)
 - **Framework**: Express.js
-- **Runtime**: Node.js
-- **Port**: 3000
+- **Language**: Pure JavaScript (no TypeScript)
+- **Runtime**: Node.js 18+
+- **Port**: 3000 (configurable via .env)
 
 ## Current State
-The backend is a minimal Express server with:
-- Single `/status` endpoint that returns server health status
+Production-ready minimal backend with:
+- Single `/status` endpoint with health check
 - CORS middleware for cross-origin requests
-- Environment variable support via dotenv
+- Environment variable management with dotenv
 - Development auto-reload with nodemon
+- Clean, flat file structure
 
 ## Architecture
 ```
-server/
-  └── index.js        # Main Express application
-.env.example          # Environment variable template
-README.md             # Project documentation
-package.json          # Dependencies (express, cors, dotenv, nodemon)
+aurisvoice-backend/
+├── server.js             # Main Express application (root level)
+├── .env.example          # Environment variable template
+├── .gitignore            # Git exclusions
+├── package.json          # Dependencies
+├── package.minimal.json  # Clean template for export
+└── README.md             # Documentation
 ```
 
 ## API Endpoints
 
 ### GET /status
-Returns the current status of the AurisVoice backend.
+Health check endpoint that confirms the backend is running.
 
 **Response:**
 ```json
 {
   "ok": true,
-  "message": "AurisVoice backend is running"
+  "message": "AurisVoice backend is running 🚀"
 }
 ```
 

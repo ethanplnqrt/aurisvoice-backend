@@ -6,7 +6,6 @@ import dotenv from 'dotenv';
 dotenv.config();
 
 const app = express();
-// Use PORT from environment (Replit sets this to 5000) or default to 3000 for local dev
 const PORT = process.env.PORT || 3000;
 
 // Middleware
@@ -17,7 +16,7 @@ app.use(express.json());
 app.get('/status', (req, res) => {
   res.json({
     ok: true,
-    message: 'AurisVoice backend is running'
+    message: 'AurisVoice backend is running 🚀'
   });
 });
 

@@ -3,10 +3,10 @@
   "version": "1.0.0",
   "description": "Minimal Node.js backend for AurisVoice AI voice dubbing SaaS",
   "type": "module",
-  "main": "server/index.js",
+  "main": "server.js",
   "scripts": {
-    "dev": "nodemon server/index.js",
-    "start": "node server/index.js"
+    "dev": "nodemon server.js",
+    "start": "node server.js"
   },
   "keywords": [
     "voice",
