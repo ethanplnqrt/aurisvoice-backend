@@ -152,14 +152,30 @@ Ready to extend with:
 - 🔒 API key authentication
 - 📊 Rate limiting
 
-## Clean Package.json
+## Export to GitHub or Cursor
 
-For a fresh start when exporting, use `package.minimal.json`:
+**Important:** The Replit package.json contains extra dependencies from the original template that cannot be directly edited. When exporting your project:
 
-```bash
-# Replace package.json with the minimal version
-cp package.minimal.json package.json
-npm install
-```
+### Quick Export Method:
 
-This removes all unnecessary dependencies and keeps only what you need.
+1. **Copy these files to your new project:**
+   - `server.js` (main application)
+   - `.env.example` (configuration template)
+   - `.gitignore` (version control rules)
+   - `README.md` (this file)
+   - `package.minimal.json` → rename to `package.json`
+
+2. **Install clean dependencies:**
+   ```bash
+   npm install
+   ```
+
+3. **Verify it works:**
+   ```bash
+   npm run dev
+   curl http://localhost:3000/status
+   ```
+
+**See `EXPORT_GUIDE.md` for detailed instructions.**
+
+The exported project will have only 4 dependencies (express, cors, dotenv, nodemon) with no React, TypeScript, or frontend bloat.
