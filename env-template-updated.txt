@@ -1,0 +1,25 @@
+# ===========================================
+# AurisVoice Backend - Environment Variables
+# ===========================================
+
+# OpenAI API Key (for Text-to-Speech)
+# Get your key from: https://platform.openai.com/api-keys
+# Model: gpt-4o-mini-tts
+# Voice: alloy
+OPENAI_API_KEY=sk-your-actual-openai-key-here
+
+# ElevenLabs API Key (optional - premium quality voices)
+# Get your key from: https://elevenlabs.io/app/settings
+ELEVENLABS_API_KEY=your-actual-elevenlabs-key-here
+
+# Server Configuration
+PORT=3000
+NODE_ENV=development
+
+# ===========================================
+# Setup Instructions:
+# 1. Copy this file to .env
+# 2. Add your OpenAI API key
+# 3. Start backend: node server-dub.js
+# 4. Verify: curl http://localhost:3000/verify-openai
+# ===========================================

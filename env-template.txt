@@ -1,0 +1,39 @@
+# ===========================================
+# AurisVoice Backend - Environment Variables
+# ===========================================
+#
+# Copy this file to .env and fill in your API keys
+# Command: cp env-template.txt .env
+#
+# ===========================================
+
+# OpenAI API Key (for Text-to-Speech)
+# Get your key from: https://platform.openai.com/api-keys
+# Model used: tts-1 (standard quality, cost-effective)
+# Voice used: nova (female, multilingual)
+OPENAI_API_KEY=sk-your-actual-openai-key-here
+
+# ElevenLabs API Key (optional - premium quality voices)
+# Get your key from: https://elevenlabs.io/app/settings
+# Used as primary option if available
+ELEVENLABS_API_KEY=your-actual-elevenlabs-key-here
+
+# Server Configuration
+PORT=3000
+NODE_ENV=development
+
+# ===========================================
+# Instructions:
+# ===========================================
+# 1. Get OpenAI API key: https://platform.openai.com/api-keys
+# 2. Replace "sk-your-actual-openai-key-here" with your real key
+# 3. Save this file as ".env" (not .env.txt)
+# 4. Start backend: node server-dub.js
+# 5. Verify: You should see "🔑 OpenAI API: ✅"
+#
+# Note: The system works in 3 modes:
+# - ElevenLabs mode (if ELEVENLABS_API_KEY is set)
+# - OpenAI mode (if OPENAI_API_KEY is set)
+# - Mock mode (if no keys are set - for testing)
+# ===========================================
+
