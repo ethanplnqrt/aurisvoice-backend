@@ -1,0 +1,12 @@
+{
+  "credits": 10,
+  "history": [
+    {
+      "type": "initial",
+      "amount": 10,
+      "date": "2025-11-12T00:00:00.000Z",
+      "description": "Crédits initiaux de bienvenue"
+    }
+  ]
+}
+
