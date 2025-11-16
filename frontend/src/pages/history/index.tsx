@@ -274,25 +274,14 @@ export default function History() {
                 </div>
               ) : filteredProjects.length === 0 ? (
                 // Empty State
-                <div className="flex flex-col items-center justify-center py-20 text-gray-500">
-                  <svg
-                    xmlns="http://www.w3.org/2000/svg"
-                    className="h-16 w-16 text-gray-400 mb-4"
-                    fill="none"
-                    viewBox="0 0 24 24"
-                    stroke="currentColor"
-                  >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth={1.5}
-                      d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V8a2 2 0 00-2-2H5A2 2 0 003 8v9a2 2 0 002 2z"
-                    />
-                  </svg>
-                  <h2 className="text-xl font-semibold">Aucun projet pour le moment</h2>
-                  <p className="text-gray-400 mt-2 text-center">
-                    Vos projets apparaîtront ici lorsque vous aurez effectué vos premiers doublages.
-                  </p>
+                <div className="text-center py-20 opacity-70">
+                  <h2 className="text-xl font-semibold mb-2 text-white">Aucun projet pour le moment</h2>
+                  <p className="mb-6 text-white/70">Vos futurs projets apparaîtront ici.</p>
+                  <Link href="/">
+                    <button className="px-4 py-2 bg-indigo-600 text-white rounded-xl hover:bg-indigo-700 transition">
+                      Créer un projet
+                    </button>
+                  </Link>
                 </div>
               ) : (
                 // History Table

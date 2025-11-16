@@ -52,6 +52,10 @@ export default function Dashboard() {
         const res = await fetch(`${baseUrl}/api/projects`, {
           headers: { 'Accept': 'application/json' }
         });
+        if (res.status === 404) {
+          if (isMounted) setProjects([]);
+          return;
+        }
         if (!res.ok) {
           throw new Error(`Erreur API (${res.status})`);
         }
@@ -355,26 +359,16 @@ export default function Dashboard() {
                 </motion.div>
               </div>
             ) : filteredProjects.length === 0 ? (
-                // Empty State
-                <div className="text-center py-16">
-                  <motion.div
-                    initial={{ opacity: 0, scale: 0.9 }}
-                    animate={{ opacity: 1, scale: 1 }}
-                    transition={{ duration: 0.5 }}
-                  >
-                    <Headphones className="h-20 w-20 text-white/20 mx-auto mb-4" />
-                    <p className="text-white/60 text-lg mb-2">
-                      {searchQuery || languageFilter !== 'all' 
-                        ? 'Aucun projet trouvé' 
-                        : 'Aucun projet pour le moment.'}
-                    </p>
-                    <p className="text-white/40 text-sm">
-                      {searchQuery || languageFilter !== 'all'
-                        ? 'Essayez de modifier vos filtres'
-                        : 'Créez votre premier doublage depuis la page d\'accueil'}
-                    </p>
-                  </motion.div>
-                </div>
+              // Empty State (no projects)
+              <div className="text-center py-20 opacity-70">
+                <h2 className="text-xl font-semibold mb-2 text-white">Aucun projet pour le moment</h2>
+                <p className="mb-6 text-white/70">Vos futurs projets apparaîtront ici.</p>
+                <Link href="/">
+                  <button className="px-4 py-2 bg-indigo-600 text-white rounded-xl hover:bg-indigo-700 transition">
+                    Créer un projet
+                  </button>
+                </Link>
+              </div>
               ) : (
                 // Projects Table
                 <div className="overflow-x-auto">
