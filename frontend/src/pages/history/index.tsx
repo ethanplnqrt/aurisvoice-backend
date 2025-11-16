@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import Head from 'next/head';
 import Link from 'next/link';
 import { motion } from 'framer-motion';
@@ -31,58 +31,43 @@ interface HistoryProject {
 }
 
 export default function History() {
-  // Mock history data - will connect to GET /api/history
-  const [historyProjects, setHistoryProjects] = useState<HistoryProject[]>([
-    {
-      id: 1,
-      file: "voice1.mp3",
-      lang: "fr",
-      model: "OpenAI TTS",
-      provider: "openai",
-      date: "2025-11-05",
-      duration: "0:12"
-    },
-    {
-      id: 2,
-      file: "voice2.mp3",
-      lang: "en",
-      model: "ElevenLabs",
-      provider: "elevenlabs",
-      date: "2025-11-04",
-      duration: "0:09"
-    },
-    {
-      id: 3,
-      file: "voice3.mp3",
-      lang: "es",
-      model: "OpenAI TTS",
-      provider: "openai",
-      date: "2025-11-02",
-      duration: "0:15"
-    },
-    {
-      id: 4,
-      file: "podcast-intro.mp3",
-      lang: "de",
-      model: "OpenAI TTS",
-      provider: "openai",
-      date: "2025-11-01",
-      duration: "0:20"
-    },
-    {
-      id: 5,
-      file: "tutorial-video.mp3",
-      lang: "it",
-      model: "Mock",
-      provider: "mock",
-      date: "2025-10-30",
-      duration: "0:08"
-    }
-  ]);
+  const [historyProjects, setHistoryProjects] = useState<HistoryProject[]>([]);
+  const [isLoading, setIsLoading] = useState<boolean>(true);
+  const [hasError, setHasError] = useState<boolean>(false);
 
   const [searchQuery, setSearchQuery] = useState('');
   const [languageFilter, setLanguageFilter] = useState('all');
   const [modelFilter, setModelFilter] = useState('all');
+
+  useEffect(() => {
+    let mounted = true;
+    (async () => {
+      setIsLoading(true);
+      setHasError(false);
+      try {
+        const res = await fetch('/api/history', { headers: { Accept: 'application/json' } });
+        if (res.status === 404) {
+          if (mounted) {
+            setHistoryProjects([]);
+          }
+          return;
+        }
+        if (!res.ok) {
+          throw new Error(`API Error: ${res.status}`);
+        }
+        const data = await res.json();
+        if (mounted) {
+          const list = Array.isArray(data) ? data : (Array.isArray(data?.history) ? data.history : []);
+          setHistoryProjects(list as HistoryProject[]);
+        }
+      } catch (_) {
+        if (mounted) setHasError(true);
+      } finally {
+        if (mounted) setIsLoading(false);
+      }
+    })();
+    return () => { mounted = false; };
+  }, []);
 
   const languageFlags: Record<string, string> = {
     fr: '🇫🇷',
@@ -277,26 +262,37 @@ export default function History() {
                 Tous les projets
               </h2>
 
-              {filteredProjects.length === 0 ? (
-                // Empty State
+              {isLoading ? (
                 <div className="text-center py-16">
                   <motion.div
-                    initial={{ opacity: 0, scale: 0.9 }}
+                    initial={{ opacity: 0, scale: 0.95 }}
                     animate={{ opacity: 1, scale: 1 }}
-                    transition={{ duration: 0.5 }}
+                    transition={{ duration: 0.4 }}
                   >
-                    <FileAudio className="h-20 w-20 text-white/20 mx-auto mb-4" />
-                    <p className="text-white/60 text-lg mb-2">
-                      {searchQuery || languageFilter !== 'all' || modelFilter !== 'all'
-                        ? 'Aucun projet trouvé'
-                        : 'Aucun doublage pour le moment'}
-                    </p>
-                    <p className="text-white/40 text-sm">
-                      {searchQuery || languageFilter !== 'all' || modelFilter !== 'all'
-                        ? 'Essayez de modifier vos filtres'
-                        : 'Créez votre premier doublage depuis la page d\'accueil'}
-                    </p>
+                    <p className="text-white/70 text-lg">Chargement de l'historique...</p>
                   </motion.div>
+                </div>
+              ) : filteredProjects.length === 0 ? (
+                // Empty State
+                <div className="flex flex-col items-center justify-center py-20 text-gray-500">
+                  <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    className="h-16 w-16 text-gray-400 mb-4"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    stroke="currentColor"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={1.5}
+                      d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V8a2 2 0 00-2-2H5A2 2 0 003 8v9a2 2 0 002 2z"
+                    />
+                  </svg>
+                  <h2 className="text-xl font-semibold">Aucun projet pour le moment</h2>
+                  <p className="text-gray-400 mt-2 text-center">
+                    Vos projets apparaîtront ici lorsque vous aurez effectué vos premiers doublages.
+                  </p>
                 </div>
               ) : (
                 // History Table
@@ -418,7 +414,12 @@ export default function History() {
                 </div>
               )}
 
-              {/* Results Count */}
+              {/* Results / Error */}
+              {hasError && filteredProjects.length > 0 && (
+                <div className="mt-6 text-center">
+                  <p className="text-red-300 text-sm">Une erreur est survenue lors du chargement de l'historique.</p>
+                </div>
+              )}
               {filteredProjects.length > 0 && (
                 <div className="mt-6 text-center">
                   <p className="text-white/40 text-sm">
