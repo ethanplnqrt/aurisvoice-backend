@@ -4,7 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "build": "next build && next export",
+    "build": "next build",
     "build:pwa": "node scripts/build-pwa.js",
     "start": "next start",
     "lint": "next lint",
