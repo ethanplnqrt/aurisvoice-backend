@@ -1,12 +1,35 @@
 {
-  "credits": 10,
+  "credits": 55,
   "history": [
     {
       "type": "initial",
       "amount": 10,
       "date": "2025-11-12T00:00:00.000Z",
       "description": "Crédits initiaux de bienvenue"
+    },
+    {
+      "type": "add",
+      "amount": 15,
+      "oldBalance": 10,
+      "newBalance": 25,
+      "date": "2025-11-15T09:32:53.466Z",
+      "description": "Achat starter (€5)"
+    },
+    {
+      "type": "add",
+      "amount": 15,
+      "oldBalance": 25,
+      "newBalance": 40,
+      "date": "2025-11-15T15:20:41.520Z",
+      "description": "Achat starter (€5)"
+    },
+    {
+      "type": "add",
+      "amount": 15,
+      "oldBalance": 40,
+      "newBalance": 55,
+      "date": "2025-11-16T08:15:12.284Z",
+      "description": "Test achat starter (€5)"
     }
   ]
 }
-

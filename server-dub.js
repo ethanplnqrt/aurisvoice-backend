@@ -6,6 +6,7 @@ import multer from "multer";
 import path from "path";
 import fs from "fs";
 import { fileURLToPath } from "url";
+import { getCredits, deductCredits, hasEnoughCredits, calculateCreditsNeeded } from "./credits.js";
 
 dotenv.config();
 
@@ -345,6 +346,36 @@ app.post("/api/dub", upload.single('file'), async (req, res) => {
     // Generate unique job ID
     const jobId = Date.now().toString();
     
+    // Calculate required credits (1 credit = 10 seconds)
+    // For now, estimate based on file size (rough approximation)
+    // In production, you'd get actual duration from audio/video metadata
+    const estimatedDurationSeconds = Math.max(10, Math.ceil(req.file.size / (1024 * 100))); // Rough estimate
+    const requiredCredits = calculateCreditsNeeded(estimatedDurationSeconds);
+    
+    console.log(`💰 Estimated duration: ${estimatedDurationSeconds}s → ${requiredCredits} credits required`);
+    
+    // Check if user has enough credits BEFORE processing
+    const creditsResult = getCredits();
+    if (!creditsResult.ok) {
+      return res.status(500).json({
+        ok: false,
+        error: "Failed to check credits balance"
+      });
+    }
+    
+    if (!hasEnoughCredits(requiredCredits)) {
+      console.log(`❌ Insufficient credits: ${creditsResult.credits} < ${requiredCredits}`);
+      return res.status(402).json({
+        ok: false,
+        error: "NOT_ENOUGH_CREDITS",
+        credits: creditsResult.credits,
+        required: requiredCredits,
+        message: `Vous avez besoin de ${requiredCredits} crédits pour ce doublage (${creditsResult.credits} disponibles)`
+      });
+    }
+    
+    console.log(`✅ Credits check passed: ${creditsResult.credits} >= ${requiredCredits}`);
+    
     // Check if API keys are available
     const hasElevenLabs = !!process.env.ELEVENLABS_API_KEY;
     const hasOpenAI = !!process.env.OPENAI_API_KEY;
@@ -405,6 +436,15 @@ app.post("/api/dub", upload.single('file'), async (req, res) => {
 
     // Clean up uploaded file
     fs.unlinkSync(req.file.path);
+    
+    // Deduct credits AFTER successful generation
+    const deductResult = deductCredits(requiredCredits, `Doublage ${targetLanguage} (${estimatedDurationSeconds}s)`);
+    if (!deductResult.ok) {
+      console.error(`⚠️  Failed to deduct credits: ${deductResult.error}`);
+      // Don't fail the request, but log the error
+    } else {
+      console.log(`💸 Credits deducted: -${requiredCredits} (new balance: ${deductResult.credits})`);
+    }
 
     res.json({
       ok: true,
@@ -412,7 +452,9 @@ app.post("/api/dub", upload.single('file'), async (req, res) => {
       jobId: jobId,
       message: "Dub generated successfully",
       provider: provider,
-      targetLanguage: targetLanguage
+      targetLanguage: targetLanguage,
+      creditsUsed: requiredCredits,
+      creditsRemaining: deductResult.ok ? deductResult.credits : creditsResult.credits
     });
 
   } catch (error) {
@@ -421,6 +463,15 @@ app.post("/api/dub", upload.single('file'), async (req, res) => {
     // Clean up uploaded file if it exists
     if (req.file && fs.existsSync(req.file.path)) {
       fs.unlinkSync(req.file.path);
+    }
+    
+    // If error is 402 (payment required), return it as-is
+    if (error.statusCode === 402 || error.message?.includes('NOT_ENOUGH_CREDITS')) {
+      return res.status(402).json({
+        ok: false,
+        error: "NOT_ENOUGH_CREDITS",
+        message: error.message || "Crédits insuffisants"
+      });
     }
 
     res.status(500).json({
@@ -603,7 +654,7 @@ app.use((err, req, res, next) => {
   });
 });
 
-const PORT = process.env.PORT || 10000;
+const PORT = process.env.DUB_PORT || 10000;
 app.listen(PORT, async () => {
   const isProduction = process.env.NODE_ENV === 'production';
   

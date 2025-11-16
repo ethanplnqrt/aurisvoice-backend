@@ -18,12 +18,15 @@ import {
   Globe,
   Play,
   ArrowRight,
-  AudioWaveform
+  AudioWaveform,
+  WifiOff
 } from 'lucide-react';
 import { generateDub } from '@/lib/api';
+import { useIsOffline } from '@/lib/useIsOffline';
 
 export default function Home() {
   const { t } = useTranslation();
+  const isOffline = useIsOffline();
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [targetLanguage, setTargetLanguage] = useState('en');
   const [isGenerating, setIsGenerating] = useState(false);
@@ -39,6 +42,11 @@ export default function Home() {
   const handleGenerate = async () => {
     if (!selectedFile) {
       setError('Veuillez sélectionner un fichier audio ou vidéo');
+      return;
+    }
+
+    if (isOffline) {
+      setError('Vous êtes hors ligne. Le doublage nécessite une connexion internet.');
       return;
     }
 
@@ -411,15 +419,20 @@ export default function Home() {
                   {/* Generate Button */}
                   <motion.button
                     onClick={handleGenerate}
-                    disabled={!selectedFile || isGenerating}
+                    disabled={!selectedFile || isGenerating || isOffline}
                     className="w-full py-5 px-8 bg-gradient-to-r from-indigo-500 via-purple-500 to-pink-500 hover:from-indigo-600 hover:via-purple-600 hover:to-pink-600 disabled:from-gray-700 disabled:to-gray-800 disabled:cursor-not-allowed text-white font-bold text-xl rounded-2xl shadow-xl hover:shadow-purple-500/50 transition-all duration-300 flex items-center justify-center gap-3"
-                    whileHover={selectedFile && !isGenerating ? { scale: 1.02 } : {}}
-                    whileTap={selectedFile && !isGenerating ? { scale: 0.98 } : {}}
+                    whileHover={selectedFile && !isGenerating && !isOffline ? { scale: 1.02 } : {}}
+                    whileTap={selectedFile && !isGenerating && !isOffline ? { scale: 0.98 } : {}}
                   >
                     {isGenerating ? (
                       <>
                         <Loader2 className="h-7 w-7 animate-spin" />
                         <span>Processing...</span>
+                      </>
+                    ) : isOffline ? (
+                      <>
+                        <WifiOff className="h-7 w-7" />
+                        <span>Hors ligne</span>
                       </>
                     ) : (
                       <>

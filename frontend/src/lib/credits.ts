@@ -1,7 +1,7 @@
 // AurisVoice - Credits API Client
 // Functions for interacting with the credits and payment system
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3000';
+const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3003';
 
 export interface CreditsResponse {
   ok: boolean;
@@ -52,7 +52,7 @@ export async function getCredits(): Promise<CreditsResponse> {
  */
 export async function createCheckoutSession(plan: string): Promise<CheckoutResponse> {
   try {
-    const response = await fetch(`${API_URL}/api/checkout`, {
+    const response = await fetch(`${API_URL}/api/stripe/checkout`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',

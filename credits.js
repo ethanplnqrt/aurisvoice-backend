@@ -10,6 +10,28 @@ const __dirname = path.dirname(__filename);
 
 const CREDITS_FILE = path.join(__dirname, 'credits.json');
 
+// Setup logs directory and file
+const logsDir = path.join(__dirname, 'logs');
+const creditsLogFile = path.join(logsDir, 'credits.log');
+
+// Ensure logs directory exists
+if (!fs.existsSync(logsDir)) {
+  fs.mkdirSync(logsDir, { recursive: true });
+}
+
+// Helper function to write credit transaction logs
+function writeCreditLog(action, amount, newBalance, reason) {
+  const timestamp = new Date().toISOString();
+  const amountStr = action === 'ADD' ? `+${amount}` : `-${amount}`;
+  const logLine = `[${timestamp}] ${action} | ${amountStr} | ${newBalance} | ${reason}\n`;
+  
+  try {
+    fs.appendFileSync(creditsLogFile, logLine, 'utf8');
+  } catch (error) {
+    console.error('❌ Failed to write to credits log file:', error);
+  }
+}
+
 // Initialize credits file if it doesn't exist
 function initializeCreditsFile() {
   if (!fs.existsSync(CREDITS_FILE)) {
@@ -78,6 +100,9 @@ export function addCredits(amount, description = 'Achat de crédits') {
     
     fs.writeFileSync(CREDITS_FILE, JSON.stringify(parsed, null, 2));
     
+    // Log transaction
+    writeCreditLog('ADD', amount, newBalance, description);
+    
     console.log(`💰 Credits added: +${amount} (${oldBalance} → ${newBalance})`);
     
     return {
@@ -132,6 +157,9 @@ export function deductCredits(amount, description = 'Génération de doublage') 
     }
     
     fs.writeFileSync(CREDITS_FILE, JSON.stringify(parsed, null, 2));
+    
+    // Log transaction
+    writeCreditLog('DEDUCT', amount, newBalance, description);
     
     console.log(`💸 Credits deducted: -${amount} (${oldBalance} → ${newBalance})`);
     

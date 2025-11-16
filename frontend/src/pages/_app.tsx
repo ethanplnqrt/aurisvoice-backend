@@ -7,6 +7,9 @@ import { Navbar } from '@/components/Navbar';
 import { Footer } from '@/components/Footer';
 import { TransitionWrapper } from '@/components/TransitionWrapper';
 import { ScrollToTop } from '@/components/ScrollToTop';
+import { ServiceWorkerRegister } from '@/components/ServiceWorkerRegister';
+import { InstallPrompt } from '@/components/InstallPrompt';
+import { CapacitorDetector } from '@/components/CapacitorDetector';
 
 export default function App({ Component, pageProps }: AppProps) {
   const router = useRouter();
@@ -36,6 +39,15 @@ export default function App({ Component, pageProps }: AppProps) {
         
         {/* Scroll to Top button */}
         <ScrollToTop />
+        
+        {/* Service Worker Registration */}
+        <ServiceWorkerRegister />
+        
+        {/* Install Prompt */}
+        <InstallPrompt />
+        
+        {/* Capacitor Detector */}
+        <CapacitorDetector />
       </div>
     </ThemeProvider>
   );

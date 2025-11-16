@@ -81,7 +81,7 @@ export default function Credits() {
   const fetchCredits = async () => {
     try {
       setLoading(true);
-      const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3000';
+      const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3003';
       const response = await fetch(`${API_URL}/api/credits`);
       const data = await response.json();
       
@@ -103,8 +103,8 @@ export default function Credits() {
       setCheckoutLoading(planId);
       setError(null);
       
-      const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3000';
-      const response = await fetch(`${API_URL}/api/checkout`, {
+      const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3003';
+      const response = await fetch(`${API_URL}/api/stripe/checkout`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

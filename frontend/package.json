@@ -5,8 +5,19 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
+    "build:pwa": "node scripts/build-pwa.js",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "next lint",
+    "android:sync": "npx cap sync android",
+    "android:open": "npx cap open android",
+    "android:build": "npm run build:pwa && npx cap copy android",
+    "android:apk": "npm run android:build && cd mobile/android && ./gradlew assembleDebug",
+    "android:aab": "npm run android:build && cd mobile/android && ./gradlew bundleRelease",
+    "android:verify": "node scripts/verify-pwa-files.js",
+    "ios:sync": "npx cap sync ios",
+    "ios:open": "npx cap open ios",
+    "ios:build": "npm run build:pwa && npx cap copy ios",
+    "ios:prepare": "npm run ios:build && npm run ios:open"
   },
   "dependencies": {
     "next": "14.2.18",

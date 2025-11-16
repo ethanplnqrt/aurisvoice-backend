@@ -7,6 +7,7 @@ import { motion } from 'framer-motion';
 import { useTranslation } from '@/i18n/useTranslation';
 import { ThemeToggle } from './ThemeToggle';
 import { LanguageSwitcher } from './LanguageSwitcher';
+import { InstallButton } from './InstallButton';
 import { Mic2 } from 'lucide-react';
 
 export function Navbar() {
@@ -99,6 +100,7 @@ export function Navbar() {
 
           {/* Right side controls */}
           <div className="flex items-center gap-2">
+            <InstallButton />
             <ThemeToggle />
             <LanguageSwitcher />
           </div>
