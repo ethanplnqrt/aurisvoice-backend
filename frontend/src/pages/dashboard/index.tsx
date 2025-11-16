@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import Head from 'next/head';
 import Link from 'next/link';
 import { motion } from 'framer-motion';
@@ -29,41 +29,66 @@ interface Project {
 }
 
 export default function Dashboard() {
-  // Mock data - will connect to GET /api/projects later
-  const [projects, setProjects] = useState<Project[]>([
-    {
-      id: 1,
-      name: "demo-voice.mp3",
-      lang: "fr",
-      duration: "0:10",
-      date: "2025-11-05",
-      status: "Terminé",
-      fileUrl: "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3"
-    },
-    {
-      id: 2,
-      name: "english-sample.mp3",
-      lang: "en",
-      duration: "0:12",
-      date: "2025-11-04",
-      status: "Terminé",
-      fileUrl: "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-2.mp3"
-    },
-    {
-      id: 3,
-      name: "spanish-podcast.mp3",
-      lang: "es",
-      duration: "0:15",
-      date: "2025-11-03",
-      status: "Terminé",
-      fileUrl: "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-3.mp3"
-    }
-  ]);
+  // Real projects from backend
+  const [projects, setProjects] = useState<Project[]>([]);
+  const [isLoading, setIsLoading] = useState<boolean>(true);
+  const [error, setError] = useState<string>('');
 
   const [searchQuery, setSearchQuery] = useState('');
   const [languageFilter, setLanguageFilter] = useState('all');
   const [playingId, setPlayingId] = useState<number | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
+
+  useEffect(() => {
+    let isMounted = true;
+    async function fetchProjects() {
+      setIsLoading(true);
+      setError('');
+      try {
+        const baseUrl = process.env.NEXT_PUBLIC_BACKEND_URL;
+        if (!baseUrl) {
+          throw new Error('NEXT_PUBLIC_BACKEND_URL non défini');
+        }
+        const res = await fetch(`${baseUrl}/api/projects`, {
+          headers: { 'Accept': 'application/json' }
+        });
+        if (!res.ok) {
+          throw new Error(`Erreur API (${res.status})`);
+        }
+        const data = await res.json();
+        const list = Array.isArray(data?.projects) ? data.projects : (Array.isArray(data) ? data : []);
+        const formatted: Project[] = list.map((p: any, idx: number) => {
+          const durationSeconds = Number(p.durationSeconds ?? p.duration_seconds ?? 0);
+          const minutes = Math.floor(durationSeconds / 60);
+          const seconds = Math.max(0, durationSeconds % 60);
+          const duration =
+            durationSeconds > 0
+              ? `${minutes}:${seconds.toString().padStart(2, '0')}`
+              : (typeof p.duration === 'string' ? p.duration : '0:00');
+          const created = p.createdAt ?? p.created_at ?? p.date ?? new Date().toISOString();
+          const date = typeof created === 'string' ? created.substring(0, 10) : new Date(created).toISOString().substring(0, 10);
+          return {
+            id: Number(p.id ?? idx + 1),
+            name: p.name ?? p.filename ?? `projet-${idx + 1}.mp3`,
+            lang: (p.lang ?? p.language ?? 'fr').toLowerCase(),
+            duration,
+            date,
+            status: p.status ?? 'Terminé',
+            fileUrl: p.fileUrl ?? p.url ?? ''
+          } as Project;
+        });
+        if (isMounted) setProjects(formatted);
+      } catch (e: any) {
+        if (isMounted) setError(e?.message || 'Erreur inconnue');
+      } finally {
+        if (isMounted) setIsLoading(false);
+      }
+    }
+    fetchProjects();
+    return () => {
+      isMounted = false;
+    };
+  }, []);
 
   // Calculate KPIs
   const totalProjects = projects.length;
@@ -308,7 +333,28 @@ export default function Dashboard() {
                 Mes projets
               </h2>
 
-              {filteredProjects.length === 0 ? (
+            {isLoading ? (
+              <div className="text-center py-16">
+                <motion.div
+                  initial={{ opacity: 0, scale: 0.95 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  transition={{ duration: 0.4 }}
+                >
+                  <p className="text-white/70 text-lg">Chargement des projets...</p>
+                </motion.div>
+              </div>
+            ) : error ? (
+              <div className="text-center py-16">
+                <motion.div
+                  initial={{ opacity: 0, scale: 0.95 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  transition={{ duration: 0.4 }}
+                >
+                  <p className="text-red-300 text-lg mb-2">Erreur de chargement</p>
+                  <p className="text-white/60 text-sm">{error}</p>
+                </motion.div>
+              </div>
+            ) : filteredProjects.length === 0 ? (
                 // Empty State
                 <div className="text-center py-16">
                   <motion.div
@@ -320,7 +366,7 @@ export default function Dashboard() {
                     <p className="text-white/60 text-lg mb-2">
                       {searchQuery || languageFilter !== 'all' 
                         ? 'Aucun projet trouvé' 
-                        : 'Aucun projet pour le moment'}
+                        : 'Aucun projet pour le moment.'}
                     </p>
                     <p className="text-white/40 text-sm">
                       {searchQuery || languageFilter !== 'all'
