@@ -11,6 +11,10 @@ import { ServiceWorkerRegister } from '@/components/ServiceWorkerRegister';
 import { InstallPrompt } from '@/components/InstallPrompt';
 import { CapacitorDetector } from '@/components/CapacitorDetector';
 
+if (typeof window !== "undefined") {
+  console.log("ENV CHECK → BACKEND URL =", process.env.NEXT_PUBLIC_BACKEND_URL);
+}
+
 export default function App({ Component, pageProps }: AppProps) {
   const router = useRouter();
 
