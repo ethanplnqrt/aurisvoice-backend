@@ -14,7 +14,7 @@ export default function PaymentSuccess() {
     // Fetch updated credits after payment
     const fetchCredits = async () => {
       try {
-        const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3003';
+        const API_URL = process.env.NEXT_PUBLIC_BACKEND_URL as string;
         const response = await fetch(`${API_URL}/api/credits`);
         const data = await response.json();
         

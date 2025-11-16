@@ -2,7 +2,7 @@
  * API Client for AurisVoice Backend
  */
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3003';
+const API_URL = process.env.NEXT_PUBLIC_BACKEND_URL as string;
 
 export interface ApiResponse<T = any> {
   ok: boolean;

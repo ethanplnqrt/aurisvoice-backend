@@ -1,7 +1,7 @@
 // AurisVoice - Credits API Client
 // Functions for interacting with the credits and payment system
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3003';
+const API_URL = process.env.NEXT_PUBLIC_BACKEND_URL as string;
 
 export interface CreditsResponse {
   ok: boolean;
