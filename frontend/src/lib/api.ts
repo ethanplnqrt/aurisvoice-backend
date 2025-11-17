@@ -4,6 +4,11 @@
 
 const API_URL = process.env.NEXT_PUBLIC_BACKEND_URL as string;
 
+// Safety check for API URL
+if (!API_URL) {
+  console.warn('⚠️ NEXT_PUBLIC_BACKEND_URL is not defined. API calls will fail in production.');
+}
+
 export interface ApiResponse<T = any> {
   ok: boolean;
   data?: T;

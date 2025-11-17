@@ -13,6 +13,7 @@ import {
   Loader2,
   TrendingUp
 } from 'lucide-react';
+import { getCredits, createCheckoutSession } from '@/lib/credits';
 
 interface PricingPlan {
   id: string;
@@ -81,9 +82,8 @@ export default function Credits() {
   const fetchCredits = async () => {
     try {
       setLoading(true);
-      const API_URL = process.env.NEXT_PUBLIC_BACKEND_URL as string;
-      const response = await fetch(`${API_URL}/api/credits`);
-      const data = await response.json();
+      setError(null);
+      const data = await getCredits();
       
       if (data.ok) {
         setCredits(data.credits);
@@ -92,7 +92,7 @@ export default function Credits() {
       }
     } catch (err: any) {
       console.error('Error fetching credits:', err);
-      setError(err.message);
+      setError(err.message || 'Erreur lors du chargement des crédits');
     } finally {
       setLoading(false);
     }
@@ -103,26 +103,17 @@ export default function Credits() {
       setCheckoutLoading(planId);
       setError(null);
       
-      const API_URL = process.env.NEXT_PUBLIC_BACKEND_URL as string;
-      const response = await fetch(`${API_URL}/api/stripe/checkout`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ plan: planId }),
-      });
+      const result = await createCheckoutSession(planId as 'starter' | 'pro' | 'premium');
       
-      const data = await response.json();
-      
-      if (data.ok && data.url) {
+      if (result.ok && result.url) {
         // Redirect to Stripe Checkout
-        window.location.href = data.url;
+        window.location.href = result.url;
       } else {
-        throw new Error(data.error || 'Failed to create checkout session');
+        throw new Error(result.error || 'Failed to create checkout session');
       }
     } catch (err: any) {
       console.error('Checkout error:', err);
-      setError(err.message);
+      setError(err.message || 'Erreur lors de la création de la session de paiement');
       setCheckoutLoading(null);
     }
   };

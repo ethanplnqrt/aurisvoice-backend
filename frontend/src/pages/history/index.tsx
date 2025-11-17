@@ -45,16 +45,37 @@ export default function History() {
       setIsLoading(true);
       setHasError(false);
       try {
-        const res = await fetch('/api/history', { headers: { Accept: 'application/json' } });
+        const API_URL = process.env.NEXT_PUBLIC_BACKEND_URL as string;
+        if (!API_URL) {
+          throw new Error('NEXT_PUBLIC_BACKEND_URL is not defined');
+        }
+
+        const res = await fetch(`${API_URL}/api/history`, { 
+          headers: { 
+            'Accept': 'application/json' 
+          } 
+        });
+        
         if (res.status === 404) {
           if (mounted) {
             setHistoryProjects([]);
           }
           return;
         }
+        
         if (!res.ok) {
+          const text = await res.text().catch(() => '');
+          console.error('History API error:', res.status, text);
           throw new Error(`API Error: ${res.status}`);
         }
+
+        const contentType = res.headers.get('content-type');
+        if (!contentType || !contentType.includes('application/json')) {
+          const text = await res.text().catch(() => '');
+          console.error('History API returned non-JSON response:', text.substring(0, 200));
+          throw new Error('Invalid response format from history API');
+        }
+
         const data = await res.json();
         if (mounted) {
           const list = Array.isArray(data) ? data : (Array.isArray(data?.history) ? data.history : []);

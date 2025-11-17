@@ -12,7 +12,11 @@ import { InstallPrompt } from '@/components/InstallPrompt';
 import { CapacitorDetector } from '@/components/CapacitorDetector';
 
 if (typeof window !== "undefined") {
-  console.log("ENV CHECK → BACKEND URL =", process.env.NEXT_PUBLIC_BACKEND_URL);
+  const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL;
+  console.log("🔧 ENV CHECK → BACKEND URL =", backendUrl || "⚠️ NOT DEFINED");
+  if (!backendUrl) {
+    console.error("❌ NEXT_PUBLIC_BACKEND_URL is not defined! API calls will fail.");
+  }
 }
 
 export default function App({ Component, pageProps }: AppProps) {

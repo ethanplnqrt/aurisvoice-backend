@@ -5,6 +5,7 @@ import Head from 'next/head';
 import Link from 'next/link';
 import { motion } from 'framer-motion';
 import { CheckCircle, Sparkles, ArrowRight, Loader2 } from 'lucide-react';
+import { getCredits } from '@/lib/credits';
 
 export default function PaymentSuccess() {
   const [credits, setCredits] = useState<number | null>(null);
@@ -14,9 +15,7 @@ export default function PaymentSuccess() {
     // Fetch updated credits after payment
     const fetchCredits = async () => {
       try {
-        const API_URL = process.env.NEXT_PUBLIC_BACKEND_URL as string;
-        const response = await fetch(`${API_URL}/api/credits`);
-        const data = await response.json();
+        const data = await getCredits();
         
         if (data.ok) {
           setCredits(data.credits);
