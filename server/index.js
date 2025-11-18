@@ -2,7 +2,6 @@
 // Handles: Stripe, Webhooks, Credits, Dubbing, History, API
 
 import express from 'express';
-import cors from 'cors';
 import dotenv from 'dotenv';
 import Stripe from 'stripe';
 import multer from 'multer';
@@ -17,6 +16,19 @@ const __dirname = dirname(__filename);
 dotenv.config();
 
 const app = express();
+
+// CORS Configuration - Must be first middleware
+app.use((req, res, next) => {
+  res.header("Access-Control-Allow-Origin", process.env.CORS_ORIGIN || "*");
+  res.header("Access-Control-Allow-Methods", "GET,POST,PUT,DELETE,OPTIONS");
+  res.header("Access-Control-Allow-Headers", "Content-Type, Authorization");
+  res.header("Access-Control-Allow-Credentials", "true");
+
+  if (req.method === "OPTIONS") {
+    return res.sendStatus(200);
+  }
+  next();
+});
 
 // ============================================================================
 // SETUP & CONFIGURATION
@@ -47,28 +59,6 @@ const stripe = new Stripe(STRIPE_SECRET_KEY, {
   apiVersion: '2024-11-20.acacia',
 });
 
-// CORS Configuration
-const allowedOrigins = [
-  "http://localhost:3001",
-  "http://localhost:3000",
-  "https://profound-basbousa-d0683f.netlify.app"
-];
-
-app.use(cors({
-  origin: function (origin, callback) {
-    if (!origin) return callback(null, true);
-    if (allowedOrigins.includes(origin)) {
-      return callback(null, true);
-    }
-    console.warn("❌ CORS blocked origin:", origin);
-    return callback(new Error("Not allowed by CORS"));
-  },
-  credentials: true,
-  methods: ["GET", "POST", "OPTIONS"],
-  allowedHeaders: ["Content-Type", "Authorization"],
-}));
-
-app.options("*", cors());
 app.use(express.json());
 
 // Serve static files from output directory
@@ -1095,7 +1085,7 @@ app.listen(PORT, async () => {
   console.log(`\n📡 Server:`);
   console.log(`   Port: ${PORT}`);
   console.log(`   Environment: ${process.env.NODE_ENV || 'development'}`);
-  console.log(`   CORS Origin: ${process.env.CORS_ORIGIN || process.env.FRONTEND_URL || '*'}`);
+  console.log(`   CORS Origin: ${process.env.CORS_ORIGIN || '*'}`);
   console.log(`\n💳 Stripe Configuration:`);
   console.log(`   Secret Key: ${process.env.STRIPE_SECRET_KEY ? '✅ Configured' : '❌ Missing'}`);
   console.log(`   Webhook Secret: ${process.env.STRIPE_WEBHOOK_SECRET ? '✅ Configured' : '⚠️  Test mode'}`);
