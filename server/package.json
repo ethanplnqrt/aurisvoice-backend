@@ -4,14 +4,15 @@
   "type": "module",
   "main": "index.js",
   "scripts": {
-    "start": "node index.js"
+    "start": "node index.js",
+    "dev": "node index.js"
   },
   "dependencies": {
     "express": "latest",
     "cors": "latest",
     "dotenv": "latest",
     "stripe": "latest",
-    "multer": "latest"
+    "multer": "latest",
+    "fs-extra": "latest"
   }
 }
-
