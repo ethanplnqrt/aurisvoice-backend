@@ -48,14 +48,16 @@ const stripe = new Stripe(STRIPE_SECRET_KEY, {
 });
 
 // CORS Configuration
-const corsOptions = {
-  origin: process.env.CORS_ORIGIN || process.env.FRONTEND_URL || '*',
+app.use(cors({
+  origin: (origin, callback) => {
+    callback(null, origin);
+  },
   credentials: true,
-  optionsSuccessStatus: 200
-};
+  methods: ["GET", "POST", "OPTIONS"],
+  allowedHeaders: ["Content-Type", "Authorization"],
+}));
 
-// Middleware
-app.use(cors(corsOptions));
+app.options("*", cors());
 app.use(express.json());
 
 // Serve static files from output directory
