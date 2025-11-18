@@ -48,9 +48,20 @@ const stripe = new Stripe(STRIPE_SECRET_KEY, {
 });
 
 // CORS Configuration
+const allowedOrigins = [
+  "http://localhost:3001",
+  "http://localhost:3000",
+  "https://profound-basbousa-d0683f.netlify.app"
+];
+
 app.use(cors({
-  origin: (origin, callback) => {
-    callback(null, origin);
+  origin: function (origin, callback) {
+    if (!origin) return callback(null, true);
+    if (allowedOrigins.includes(origin)) {
+      return callback(null, true);
+    }
+    console.warn("❌ CORS blocked origin:", origin);
+    return callback(new Error("Not allowed by CORS"));
   },
   credentials: true,
   methods: ["GET", "POST", "OPTIONS"],
