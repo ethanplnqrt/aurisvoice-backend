@@ -18,15 +18,37 @@ dotenv.config();
 const app = express();
 
 // CORS Configuration - Must be first middleware
+const allowedOrigins = [
+  "http://localhost:3001",
+  "http://localhost:3000",
+  "https://profound-basbousa-d0683f.netlify.app",
+  "https://aurisvoice-kljp4yrwm-ethanplnqrts-projects.vercel.app"
+];
+
 app.use((req, res, next) => {
-  res.header("Access-Control-Allow-Origin", process.env.CORS_ORIGIN || "*");
+  const origin = req.headers.origin;
+  
+  // Check if origin is in allowed list
+  if (origin && allowedOrigins.includes(origin)) {
+    res.header("Access-Control-Allow-Origin", origin); // Return EXACT origin, not "*"
+  } else if (!origin) {
+    // Allow requests with no origin (e.g., mobile apps, Postman)
+    res.header("Access-Control-Allow-Origin", "*");
+  } else {
+    // Block unauthorized origins
+    console.warn("❌ CORS blocked origin:", origin);
+    return res.status(403).json({ error: "Not allowed by CORS" });
+  }
+  
   res.header("Access-Control-Allow-Methods", "GET,POST,PUT,DELETE,OPTIONS");
   res.header("Access-Control-Allow-Headers", "Content-Type, Authorization");
   res.header("Access-Control-Allow-Credentials", "true");
 
+  // Handle OPTIONS preflight requests
   if (req.method === "OPTIONS") {
     return res.sendStatus(200);
   }
+  
   next();
 });
 
