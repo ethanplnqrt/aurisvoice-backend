@@ -2,6 +2,7 @@
 // Handles: Stripe, Webhooks, Credits, Dubbing, History, API
 
 import express from 'express';
+import cors from 'cors';
 import dotenv from 'dotenv';
 import Stripe from 'stripe';
 import multer from 'multer';
@@ -17,40 +18,38 @@ dotenv.config();
 
 const app = express();
 
-// CORS Configuration - Must be first middleware
 const allowedOrigins = [
-  "http://localhost:3001",
+  "http://localhost:5173",
   "http://localhost:3000",
-  "https://profound-basbousa-d0683f.netlify.app",
-  "https://aurisvoice-kljp4yrwm-ethanplnqrts-projects.vercel.app"
+  "https://aurisvoice.vercel.app",
+  "https://aurisvoice-backend.onrender.com"
 ];
 
-app.use((req, res, next) => {
-  const origin = req.headers.origin;
-  
-  // Check if origin is in allowed list
-  if (origin && allowedOrigins.includes(origin)) {
-    res.header("Access-Control-Allow-Origin", origin); // Return EXACT origin, not "*"
-  } else if (!origin) {
-    // Allow requests with no origin (e.g., mobile apps, Postman)
-    res.header("Access-Control-Allow-Origin", "*");
-  } else {
-    // Block unauthorized origins
-    console.warn("❌ CORS blocked origin:", origin);
-    return res.status(403).json({ error: "Not allowed by CORS" });
-  }
-  
-  res.header("Access-Control-Allow-Methods", "GET,POST,PUT,DELETE,OPTIONS");
-  res.header("Access-Control-Allow-Headers", "Content-Type, Authorization");
-  res.header("Access-Control-Allow-Credentials", "true");
+// Pattern matching for all dynamic Vercel preview URLs:
+const vercelWildcard = /^https:\/\/[a-z0-9-]+\.vercel\.app$/;
 
-  // Handle OPTIONS preflight requests
-  if (req.method === "OPTIONS") {
-    return res.sendStatus(200);
-  }
-  
-  next();
-});
+app.use(
+  cors({
+    origin: (origin, callback) => {
+      if (!origin) return callback(null, true);
+
+      if (
+        allowedOrigins.includes(origin) ||
+        vercelWildcard.test(origin)
+      ) {
+        return callback(null, true);
+      }
+
+      console.log("❌ CORS blocked:", origin);
+      return callback(new Error("CORS blocked for: " + origin), false);
+    },
+    credentials: true,
+    methods: ["GET", "POST", "PUT", "DELETE"],
+    allowedHeaders: ["Content-Type", "Authorization"],
+  })
+);
+
+console.log("✅ CORS system loaded.");
 
 // ============================================================================
 // SETUP & CONFIGURATION
