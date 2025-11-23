@@ -22,6 +22,7 @@ const allowedOrigins = [
   "http://localhost:5173",
   "http://localhost:3000",
   "https://aurisvoice.vercel.app",
+  "https://aurisvoice-h8y5yuebt-ethanplnqrts-projects.vercel.app",
   "https://aurisvoice-backend.onrender.com"
 ];
 
@@ -48,6 +49,8 @@ app.use(
     allowedHeaders: ["Content-Type", "Authorization"],
   })
 );
+
+app.options("*", cors());
 
 console.log("✅ CORS system loaded.");
 
@@ -80,6 +83,10 @@ const stripe = new Stripe(STRIPE_SECRET_KEY, {
   apiVersion: '2024-11-20.acacia',
 });
 
+// 1. RAW body EXCLUSIVEMENT pour Stripe webhook
+app.use('/api/stripe/webhook', express.raw({ type: 'application/json' }));
+
+// 2. JSON parser pour toutes les autres routes
 app.use(express.json());
 
 // Serve static files from output directory
@@ -468,8 +475,9 @@ app.post('/api/stripe/webhook',
   async (req, res) => {
     const clientIp = req.ip || req.connection.remoteAddress || 'unknown';
     const sig = req.headers['stripe-signature'];
-    const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET || STRIPE_WEBHOOK_SECRET;
+    const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
     
+    // Rate limiting
     const rateLimitResult = checkRateLimit(clientIp);
     if (!rateLimitResult.allowed) {
       writeSecurityLog({
@@ -477,48 +485,46 @@ app.post('/api/stripe/webhook',
         rateLimited: true,
         reason: 'RATE_LIMIT_EXCEEDED'
       });
-      console.warn(`⚠️  Rate limit exceeded for IP: ${clientIp}`);
+      console.log('[Webhook] Error: Rate limit exceeded');
       return res.status(429).json({
         ok: false,
-        error: 'Too many requests',
-        message: 'Rate limit exceeded. Please try again later.'
+        error: 'Too many requests'
       });
     }
     
-    let event;
-    let signatureValid = false;
-    
+    // Verify webhook secret exists
     if (!webhookSecret) {
       writeSecurityLog({
         ip: clientIp,
         signatureValid: false,
         reason: 'WEBHOOK_SECRET_MISSING'
       });
-      console.warn('⚠️  Webhook secret not configured');
+      console.log('[Webhook] Error: Webhook secret not configured');
       return res.status(400).json({
         ok: false,
-        error: 'Webhook secret not configured',
-        message: 'Server configuration error'
+        error: 'Webhook secret not configured'
       });
     }
     
+    // Verify signature header exists
     if (!sig) {
       writeSecurityLog({
         ip: clientIp,
         signatureValid: false,
         reason: 'SIGNATURE_HEADER_MISSING'
       });
-      console.error('❌ Stripe signature header missing');
+      console.log('[Webhook] Error: Missing stripe-signature header');
       return res.status(400).json({
         ok: false,
-        error: 'Invalid signature',
-        message: 'Missing stripe-signature header'
+        error: 'Invalid signature'
       });
     }
     
+    // Verify signature using stripe.webhooks.constructEvent
+    let event;
     try {
       event = stripe.webhooks.constructEvent(req.body, sig, webhookSecret);
-      signatureValid = true;
+      console.log('[Webhook] Signature verified');
     } catch (err) {
       writeSecurityLog({
         ip: clientIp,
@@ -527,13 +533,15 @@ app.post('/api/stripe/webhook',
         eventType: null,
         eventId: null
       });
-      console.error(`❌ Webhook signature verification failed: ${err.message}`);
+      console.log(`[Webhook] Error: Signature validation failed - ${err.message}`);
       return res.status(400).json({
         ok: false,
-        error: 'Invalid signature',
-        message: 'Webhook signature verification failed'
+        error: 'Invalid signature'
       });
     }
+    
+    // Log event received
+    console.log(`[Webhook] Event received: ${event.type}`);
     
     writeSecurityLog({
       ip: clientIp,
@@ -544,6 +552,7 @@ app.post('/api/stripe/webhook',
       rateLimited: false
     });
     
+    // Check for duplicate events (double-processing protection)
     if (event.id && processedEvents.has(event.id)) {
       writeSecurityLog({
         ip: clientIp,
@@ -553,7 +562,7 @@ app.post('/api/stripe/webhook',
         replay: true,
         reason: 'REPLAY_DETECTED'
       });
-      console.warn(`⚠️  REPLAY DETECTED: Event ${event.id} already processed`);
+      console.log('[Webhook] Duplicate event ignored');
       return res.json({ 
         ok: true, 
         received: true,
@@ -562,24 +571,26 @@ app.post('/api/stripe/webhook',
       });
     }
     
-    if (event.type !== 'checkout.session.completed') {
+    // Only process supported event types
+    const supportedEvents = ['checkout.session.completed', 'customer.subscription.updated'];
+    if (!supportedEvents.includes(event.type)) {
       writeSecurityLog({
         ip: clientIp,
         eventId: event.id,
         eventType: event.type,
         signatureValid: true,
         replay: false,
-        reason: 'IGNORED_EVENT_TYPE'
+        reason: 'UNSUPPORTED_EVENT_TYPE'
       });
-      console.log(`🔔 Ignored event type: ${event.type}`);
-      return res.json({ 
-        ok: true, 
-        received: true,
-        ignored: true,
-        message: `Event type ${event.type} is not processed`
+      console.log(`[Webhook] Event received: ${event.type} (unsupported, returning 400)`);
+      return res.status(400).json({
+        ok: false,
+        error: 'Unsupported event type',
+        message: `Event type ${event.type} is not supported`
       });
     }
     
+    // Add event to processed set (before processing to prevent race conditions)
     if (event.id) {
       processedEvents.add(event.id);
       if (processedEvents.size > MAX_PROCESSED_EVENTS) {
@@ -588,61 +599,75 @@ app.post('/api/stripe/webhook',
       }
     }
     
+    // Process event AFTER signature verification
     try {
-      const session = event.data.object;
+      let credits = 0;
+      let plan = 'unknown';
+      let amount = 0;
+      let sessionId = null;
       
-      console.log(`💰 Payment successful: ${session.id}`);
-      console.log(`   Amount: €${session.amount_total / 100}`);
-      console.log(`   Plan: ${session.metadata?.plan}`);
-      
-      const credits = parseInt(session.metadata?.credits || '0');
-      const plan = session.metadata?.plan || 'unknown';
-      const amount = session.amount_total / 100;
-      
-      writeLog(
-        event.type,
-        session.id,
-        amount,
-        credits,
-        session.metadata
-      );
-      
-      if (credits > 0) {
-        const result = addCredits(credits, `Achat ${plan} (€${amount})`);
+      if (event.type === 'checkout.session.completed') {
+        const session = event.data.object;
+        sessionId = session.id;
+        amount = session.amount_total / 100;
+        plan = session.metadata?.plan || 'unknown';
         
-        if (result.ok) {
-          console.log(`✅ Credits added successfully: +${credits}`);
-          
-          logWebhookEvent(
-            'checkout.session.completed',
-            amount,
-            credits,
-            'stripe'
-          );
-          
-          writeSecurityLog({
-            ip: clientIp,
-            eventId: event.id,
-            eventType: event.type,
-            signatureValid: true,
-            replay: false,
-            rateLimited: false,
-            reason: 'PROCESSED_SUCCESSFULLY'
-          });
+        // Get credits from environment variables or metadata
+        if (plan === 'starter') {
+          credits = parseInt(process.env.CREDITS_STARTER || session.metadata?.credits || '15');
+        } else if (plan === 'pro') {
+          credits = parseInt(process.env.CREDITS_PRO || session.metadata?.credits || '60');
+        } else if (plan === 'premium' || plan === 'expert') {
+          credits = parseInt(process.env.CREDITS_EXPERT || process.env.CREDITS_PREMIUM || session.metadata?.credits || '150');
         } else {
-          console.error(`❌ Failed to add credits: ${result.error}`);
-          writeSecurityLog({
-            ip: clientIp,
-            eventId: event.id,
-            eventType: event.type,
-            signatureValid: true,
-            replay: false,
-            rateLimited: false,
-            reason: 'CREDITS_ADD_FAILED'
-          });
+          credits = parseInt(session.metadata?.credits || '0');
         }
-      } else {
-        console.warn(`⚠️  No credits to add for session ${session.id}`);
+        
+        writeLog(event.type, sessionId, amount, credits, session.metadata);
+        
+        if (credits > 0) {
+          const result = addCredits(credits, `Achat ${plan} (€${amount})`);
+          
+          if (result.ok) {
+            console.log(`[Webhook] Credits applied: ${credits}`);
+            
+            logWebhookEvent(
+              'checkout.session.completed',
+              amount,
+              credits,
+              'stripe'
+            );
+            
+            writeSecurityLog({
+              ip: clientIp,
+              eventId: event.id,
+              eventType: event.type,
+              signatureValid: true,
+              replay: false,
+              rateLimited: false,
+              reason: 'PROCESSED_SUCCESSFULLY'
+            });
+          } else {
+            console.log(`[Webhook] Error: Failed to add credits - ${result.error}`);
+            writeSecurityLog({
+              ip: clientIp,
+              eventId: event.id,
+              eventType: event.type,
+              signatureValid: true,
+              replay: false,
+              rateLimited: false,
+              reason: 'CREDITS_ADD_FAILED'
+            });
+          }
+        } else {
+          console.log(`[Webhook] Warning: No credits to add for session ${sessionId}`);
+        }
+        
+      } else if (event.type === 'customer.subscription.updated') {
+        // Future use: Handle subscription updates
+        const subscription = event.data.object;
+        console.log(`[Webhook] Subscription updated: ${subscription.id} (not yet implemented)`);
+        
         writeSecurityLog({
           ip: clientIp,
           eventId: event.id,
@@ -650,7 +675,15 @@ app.post('/api/stripe/webhook',
           signatureValid: true,
           replay: false,
           rateLimited: false,
-          reason: 'NO_CREDITS_IN_METADATA'
+          reason: 'SUBSCRIPTION_UPDATE_RECEIVED'
+        });
+        
+        // Return success but don't process yet
+        return res.json({
+          ok: true,
+          received: true,
+          processed: false,
+          message: 'Subscription update received (not yet implemented)'
         });
       }
       
@@ -659,8 +692,9 @@ app.post('/api/stripe/webhook',
         received: true,
         processed: true
       });
+      
     } catch (error) {
-      console.error(`❌ Error processing webhook event ${event.id}:`, error);
+      console.log(`[Webhook] Error: ${error.message}`);
       writeSecurityLog({
         ip: clientIp,
         eventId: event.id,
