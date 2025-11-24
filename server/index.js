@@ -6,6 +6,7 @@ import cors from 'cors';
 import dotenv from 'dotenv';
 import Stripe from 'stripe';
 import multer from 'multer';
+import rateLimit from 'express-rate-limit';
 import { fileURLToPath } from 'url';
 import { dirname, join, extname } from 'path';
 import fs from 'fs';
@@ -73,10 +74,10 @@ const securityLogFile = join(logsDir, 'stripe-security.log');
 });
 
 // Initialize Stripe
-const STRIPE_SECRET_KEY = process.env.STRIPE_SECRET_KEY || "51SOw9eJlyCE49zWsV3mo2lO0hjAHh1GuTpHJ90GZOWfdzRaDYr0O5C0zrZTlAkVtNnv1tbL0GNDQ0Y6mD4CogpB300QHdFK4DT";
+const STRIPE_SECRET_KEY = process.env.STRIPE_SECRET_KEY;
 const STRIPE_WEBHOOK_SECRET = process.env.STRIPE_WEBHOOK_SECRET;
 if (!process.env.STRIPE_SECRET_KEY) {
-  console.log('💳 Using hardcoded TEST Stripe keys');
+  console.warn('⚠️  WARNING: STRIPE_SECRET_KEY not configured');
 }
 
 const stripe = new Stripe(STRIPE_SECRET_KEY, {
@@ -103,10 +104,13 @@ const storage = multer.diskStorage({
   }
 });
 
+// Maximum file size: 50 MB (50 * 1024 * 1024 bytes = 52,428,800 bytes)
+const MAX_FILE_SIZE = 50 * 1024 * 1024;
+
 const upload = multer({
   storage: storage,
   limits: {
-    fileSize: 50 * 1024 * 1024 // 50MB limit
+    fileSize: MAX_FILE_SIZE // 50MB limit - robust protection against abuse
   },
   fileFilter: (req, file, cb) => {
     const allowedTypes = /audio\/.*|video\/.*/;
@@ -118,9 +122,78 @@ const upload = multer({
   }
 });
 
+// Rate limiter for /api/dub route (anti-spam protection)
+const apiLimiter = rateLimit({
+  windowMs: 60 * 1000, // 1 minute
+  max: 5, // Maximum 5 requests per minute per IP
+  message: {
+    error: 'Too many requests, please try again after 1 minute.'
+  },
+  standardHeaders: true, // Return rate limit info in the `RateLimit-*` headers
+  legacyHeaders: false, // Disable the `X-RateLimit-*` headers
+  statusCode: 429 // HTTP status code for rate limit exceeded
+});
+
 // ============================================================================
 // HELPER FUNCTIONS
 // ============================================================================
+
+// Save dubbing history (placeholder for future database integration)
+function saveDubbingHistory(userId, metadata) {
+  // TODO: Integrate with database (Postgres, MongoDB, etc.)
+  // This is a placeholder function for future implementation
+  const { fileName, creditsUsed, timestamp, inputName } = metadata;
+  
+  // For now, just log the history entry
+  if (process.env.NODE_ENV !== 'production') {
+    console.log(`📝 [HISTORY] Would save: ${JSON.stringify(metadata, null, 2)}`);
+  }
+  
+  // Future implementation:
+  // - Connect to database
+  // - Insert record with userId, fileName, creditsUsed, timestamp, inputName
+  // - Handle errors appropriately
+  
+  return { ok: true, saved: true };
+}
+
+// Get dubbing history (placeholder for future database integration)
+function getDubbingHistory(userId) {
+  // TODO: Integrate with database (Postgres, MongoDB, etc.)
+  // This is a placeholder function that returns mock data
+  // Future implementation will query the database for the user's dubbing history
+  
+  const mockHistory = [
+    {
+      id: '550e8400-e29b-41d4-a716-446655440000',
+      inputName: 'video-sample-1.mp4',
+      outputFileName: 'dub-1762372473952.mp3',
+      creditsUsed: 15,
+      timestamp: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString() // 2 days ago
+    },
+    {
+      id: '550e8400-e29b-41d4-a716-446655440001',
+      inputName: 'audio-presentation.wav',
+      outputFileName: 'dub-1762458873952.mp3',
+      creditsUsed: 8,
+      timestamp: new Date(Date.now() - 1 * 24 * 60 * 60 * 1000).toISOString() // 1 day ago
+    },
+    {
+      id: '550e8400-e29b-41d4-a716-446655440002',
+      inputName: 'interview-french.mp3',
+      outputFileName: 'dub-1762545273952.mp3',
+      creditsUsed: 12,
+      timestamp: new Date().toISOString() // Today
+    }
+  ];
+  
+  // Future implementation:
+  // - Connect to database
+  // - Query: SELECT * FROM dubbing_history WHERE user_id = userId ORDER BY timestamp DESC
+  // - Return array of history records
+  
+  return mockHistory;
+}
 
 // Webhook logging
 function writeLog(eventType, sessionId, amount, credits, metadata) {
@@ -204,6 +277,9 @@ function checkRateLimit(ip) {
 // Processed events Set to prevent double crediting
 const processedEvents = new Set();
 const MAX_PROCESSED_EVENTS = 200;
+
+// User lock system to prevent race conditions in credit deduction
+const userLocks = new Map(); // userId -> Promise resolver
 
 // Webhook event log (in-memory storage)
 const webhookLog = [];
@@ -473,6 +549,16 @@ app.post('/api/stripe/checkout', express.json(), async (req, res) => {
 app.post('/api/stripe/webhook', 
   express.raw({ type: 'application/json' }),
   async (req, res) => {
+    // Log d'événement reçu (au tout début du handler)
+    try {
+      const rawBody = req.body.toString();
+      const eventData = JSON.parse(rawBody);
+      console.log(`🚨 STRIPE WEBHOOK REÇU — Type: ${eventData.type || 'unknown'}`);
+    } catch (err) {
+      // Si le parsing échoue, on log quand même la réception
+      console.log('🚨 STRIPE WEBHOOK REÇU — Type: (non parsable)');
+    }
+    
     const clientIp = req.ip || req.connection.remoteAddress || 'unknown';
     const sig = req.headers['stripe-signature'];
     const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
@@ -524,6 +610,7 @@ app.post('/api/stripe/webhook',
     let event;
     try {
       event = stripe.webhooks.constructEvent(req.body, sig, webhookSecret);
+      console.log(`🚨 STRIPE WEBHOOK REÇU — Type: ${event.type}`);
       console.log('[Webhook] Signature verified');
     } catch (err) {
       writeSecurityLog({
@@ -562,7 +649,7 @@ app.post('/api/stripe/webhook',
         replay: true,
         reason: 'REPLAY_DETECTED'
       });
-      console.log('[Webhook] Duplicate event ignored');
+      console.log(`⚠️ Webhook Doublon Détecté — ID d'événement Stripe: ${event.id}`);
       return res.json({ 
         ok: true, 
         received: true,
@@ -629,7 +716,7 @@ app.post('/api/stripe/webhook',
           const result = addCredits(credits, `Achat ${plan} (€${amount})`);
           
           if (result.ok) {
-            console.log(`[Webhook] Credits applied: ${credits}`);
+            console.log(`💰 Succès Webhook : Crédits ajoutés — Session ID: ${sessionId}, Crédits: ${credits}`);
             
             logWebhookEvent(
               'checkout.session.completed',
@@ -694,7 +781,7 @@ app.post('/api/stripe/webhook',
       });
       
     } catch (error) {
-      console.log(`[Webhook] Error: ${error.message}`);
+      console.error(`❌ Erreur Critique Webhook Stripe — Message: ${error.message}`);
       writeSecurityLog({
         ip: clientIp,
         eventId: event.id,
@@ -758,7 +845,12 @@ app.get("/api/credit", async (req, res) => {
   }
 });
 
-app.post("/api/dub", upload.single('file'), async (req, res) => {
+app.post("/api/dub", apiLimiter, upload.single('file'), async (req, res) => {
+  // Get userId early for lock management
+  const userId = req.headers['x-user-id'] || 'anonymous';
+  let isLocked = false;
+  let lockResolver = null;
+  
   try {
     if (!req.file) {
       return res.status(400).json({
@@ -767,17 +859,18 @@ app.post("/api/dub", upload.single('file'), async (req, res) => {
       });
     }
 
-    const { targetLanguage, sourceLanguage } = req.body;
+    // Extract parameters from req.body (Multer places non-file fields here)
+    const { targetLanguage, sourceLanguage, voiceModel } = req.body;
     
-    if (!targetLanguage) {
-      return res.status(400).json({
-        ok: false,
-        error: "Target language is required"
-      });
-    }
-
+    // Set default values
+    const selectedTargetLanguage = targetLanguage || 'en'; // Default: English
+    const selectedVoiceModel = voiceModel || 'nova'; // Default: Premium voice
+    
+    // Log de débogage en français
+    console.log(`🎯 Paramètres de doublage — Langue cible: ${selectedTargetLanguage}, Voix: ${selectedVoiceModel}`);
     console.log(`📁 File uploaded: ${req.file.filename}`);
-    console.log(`🌍 Target language: ${targetLanguage}`);
+    console.log(`🌍 Target language: ${selectedTargetLanguage}`);
+    console.log(`🎤 Voice model: ${selectedVoiceModel}`);
     console.log(`📊 File size: ${(req.file.size / 1024 / 1024).toFixed(2)} MB`);
 
     const jobId = Date.now().toString();
@@ -787,97 +880,189 @@ app.post("/api/dub", upload.single('file'), async (req, res) => {
     
     console.log(`💰 Estimated duration: ${estimatedDurationSeconds}s → ${requiredCredits} credits required`);
     
-    const creditsResult = getCredits();
-    if (!creditsResult.ok) {
-      return res.status(500).json({
-        ok: false,
-        error: "Failed to check credits balance"
-      });
+    // ============================================================================
+    // SÉCURISATION : Système de verrouillage pour éviter les race conditions
+    // ============================================================================
+    
+    // Wait for any existing lock on this user to be released
+    while (userLocks.has(userId)) {
+      console.log(`🔒 Waiting for lock release for user: ${userId}`);
+      await userLocks.get(userId);
     }
     
-    if (!hasEnoughCredits(requiredCredits)) {
-      console.log(`❌ Insufficient credits: ${creditsResult.credits} < ${requiredCredits}`);
-      return res.status(402).json({
-        ok: false,
-        error: "NOT_ENOUGH_CREDITS",
-        credits: creditsResult.credits,
-        required: requiredCredits,
-        message: `Vous avez besoin de ${requiredCredits} crédits pour ce doublage (${creditsResult.credits} disponibles)`
-      });
-    }
-    
-    console.log(`✅ Credits check passed: ${creditsResult.credits} >= ${requiredCredits}`);
-    
-    const hasElevenLabs = !!process.env.ELEVENLABS_API_KEY;
-    const hasOpenAI = !!process.env.OPENAI_API_KEY;
-
-    const creditStatus = await getCreditStatus();
-    const hasSufficientCredit = creditRemaining >= MIN_CREDIT;
-
-    if (!hasElevenLabs && !hasOpenAI) {
-      console.warn('⚠️ No AI API keys configured. Using mock mode.');
-      const mockAudioUrl = await generateMockDub(req.file, targetLanguage, jobId);
-      
-      return res.json({
-        ok: true,
-        audioUrl: mockAudioUrl,
-        jobId: jobId,
-        message: "Dub generated successfully (mock mode - no API keys)",
-        provider: "mock",
-        targetLanguage
-      });
-    }
-
-    if (hasOpenAI && !hasElevenLabs && !hasSufficientCredit) {
-      console.warn(`⚠️ Credit low ($${creditRemaining.toFixed(2)} < $${MIN_CREDIT.toFixed(2)}), switching to mock mode`);
-      const mockAudioUrl = await generateMockDub(req.file, targetLanguage, jobId);
-      
-      return res.json({
-        ok: true,
-        audioUrl: mockAudioUrl,
-        jobId: jobId,
-        message: "Dub generated successfully (mock mode - insufficient credit)",
-        provider: "mock",
-        creditRemaining: creditRemaining,
-        targetLanguage
-      });
-    }
-
-    let audioUrl;
-    let provider;
-
-    if (hasElevenLabs) {
-      console.log('🎙️ Using ElevenLabs for dubbing...');
-      audioUrl = await generateDubWithElevenLabs(req.file, targetLanguage, jobId);
-      provider = "elevenlabs";
-    } else if (hasOpenAI && hasSufficientCredit) {
-      console.log('🤖 Using OpenAI TTS for dubbing...');
-      audioUrl = await generateDubWithOpenAI(req.file, targetLanguage, jobId);
-      provider = "openai";
-    }
-
-    fs.unlinkSync(req.file.path);
-    
-    const deductResult = deductCredits(requiredCredits, `Doublage ${targetLanguage} (${estimatedDurationSeconds}s)`);
-    if (!deductResult.ok) {
-      console.error(`⚠️  Failed to deduct credits: ${deductResult.error}`);
-    } else {
-      console.log(`💸 Credits deducted: -${requiredCredits} (new balance: ${deductResult.credits})`);
-    }
-
-    res.json({
-      ok: true,
-      audioUrl: audioUrl,
-      jobId: jobId,
-      message: "Dub generated successfully",
-      provider: provider,
-      targetLanguage: targetLanguage,
-      creditsUsed: requiredCredits,
-      creditsRemaining: deductResult.ok ? deductResult.credits : creditsResult.credits
+    // Acquire lock for this user
+    const lockPromise = new Promise((resolve) => {
+      lockResolver = resolve;
     });
+    userLocks.set(userId, lockPromise);
+    isLocked = true;
+    
+    try {
+      // Vérification initiale des crédits (avec verrouillage actif)
+      const creditsResult = getCredits();
+      if (!creditsResult.ok) {
+        return res.status(500).json({
+          ok: false,
+          error: "Failed to check credits balance"
+        });
+      }
+      
+      if (!hasEnoughCredits(requiredCredits)) {
+        console.log(`❌ Insufficient credits: ${creditsResult.credits} < ${requiredCredits}`);
+        return res.status(402).json({
+          ok: false,
+          error: "NOT_ENOUGH_CREDITS",
+          credits: creditsResult.credits,
+          required: requiredCredits,
+          message: `Vous avez besoin de ${requiredCredits} crédits pour ce doublage (${creditsResult.credits} disponibles)`
+        });
+      }
+      
+      console.log(`✅ Credits check passed: ${creditsResult.credits} >= ${requiredCredits}`);
+      
+      // ============================================================================
+      // DÉDUCTION DES CRÉDITS AVANT LA GÉNÉRATION (sécurisée avec verrouillage)
+      // ============================================================================
+      const deductResult = deductCredits(requiredCredits, `Doublage ${selectedTargetLanguage} (${estimatedDurationSeconds}s)`);
+      
+      if (!deductResult.ok) {
+        // Si la déduction échoue (crédits insuffisants), arrêter immédiatement
+        console.error(`❌ Échec de la déduction de crédits: ${deductResult.error}`);
+        return res.status(403).json({
+          ok: false,
+          error: "INSUFFICIENT_CREDITS",
+          credits: deductResult.credits,
+          required: requiredCredits,
+          message: `Crédits insuffisants pour ce doublage. Solde actuel: ${deductResult.credits}, requis: ${requiredCredits}`
+        });
+      }
+      
+      console.log(`💸 Credits deducted: -${requiredCredits} (new balance: ${deductResult.credits})`);
+      
+      // Vérification finale juste avant l'appel TTS (double sécurité)
+      const finalCreditsCheck = getCredits();
+      if (!finalCreditsCheck.ok || finalCreditsCheck.credits < 0) {
+        console.error(`❌ Vérification finale échouée: solde invalide`);
+        // Remettre les crédits (rollback)
+        addCredits(requiredCredits, `Rollback - échec vérification finale`);
+        return res.status(403).json({
+          ok: false,
+          error: "CREDIT_VERIFICATION_FAILED",
+          message: "La vérification finale des crédits a échoué"
+        });
+      }
+      
+      const hasElevenLabs = !!process.env.ELEVENLABS_API_KEY;
+      const hasOpenAI = !!process.env.OPENAI_API_KEY;
+
+      const creditStatus = await getCreditStatus();
+      const hasSufficientCredit = creditRemaining >= MIN_CREDIT;
+
+      if (!hasElevenLabs && !hasOpenAI) {
+        console.warn('⚠️ No AI API keys configured. Using mock mode.');
+        const mockAudioUrl = await generateMockDub(req.file, selectedTargetLanguage, jobId);
+        
+        // Release lock
+        userLocks.delete(userId);
+        if (lockResolver) lockResolver();
+        isLocked = false;
+        
+        return res.json({
+          ok: true,
+          audioUrl: mockAudioUrl,
+          jobId: jobId,
+          message: "Dub generated successfully (mock mode - no API keys)",
+          provider: "mock",
+          targetLanguage: selectedTargetLanguage
+        });
+      }
+
+      if (hasOpenAI && !hasElevenLabs && !hasSufficientCredit) {
+        console.warn(`⚠️ Credit low ($${creditRemaining.toFixed(2)} < $${MIN_CREDIT.toFixed(2)}), switching to mock mode`);
+        const mockAudioUrl = await generateMockDub(req.file, selectedTargetLanguage, jobId);
+        
+        // Release lock
+        userLocks.delete(userId);
+        if (lockResolver) lockResolver();
+        isLocked = false;
+        
+        return res.json({
+          ok: true,
+          audioUrl: mockAudioUrl,
+          jobId: jobId,
+          message: "Dub generated successfully (mock mode - insufficient credit)",
+          provider: "mock",
+          creditRemaining: creditRemaining,
+          targetLanguage: selectedTargetLanguage
+        });
+      }
+
+      let audioUrl;
+      let provider;
+
+      if (hasElevenLabs) {
+        console.log('🎙️ Using ElevenLabs for dubbing...');
+        audioUrl = await generateDubWithElevenLabs(req.file, selectedTargetLanguage, jobId);
+        provider = "elevenlabs";
+      } else if (hasOpenAI && hasSufficientCredit) {
+        console.log('🤖 Using OpenAI TTS for dubbing...');
+        audioUrl = await generateDubWithOpenAI(req.file, selectedTargetLanguage, selectedVoiceModel, jobId);
+        provider = "openai";
+      }
+
+      fs.unlinkSync(req.file.path);
+
+      // Extract filename from audioUrl (e.g., "/output/dub-1234567890.mp3" -> "dub-1234567890.mp3")
+      const outputFileName = audioUrl ? audioUrl.split('/').pop() : `dub-${jobId}.mp3`;
+      const creditsUsed = requiredCredits;
+      
+      // Save dubbing history before sending response
+      const historyMetadata = {
+        fileName: outputFileName,
+        creditsUsed: creditsUsed,
+        timestamp: new Date().toISOString(),
+        inputName: req.file.originalname
+      };
+      
+      saveDubbingHistory(userId, historyMetadata);
+      console.log(`✅ Historique du doublage enregistré : ${outputFileName} (${creditsUsed} crédits utilisés)`);
+
+      // Release lock before sending response
+      userLocks.delete(userId);
+      if (lockResolver) lockResolver();
+      isLocked = false;
+
+      res.json({
+        ok: true,
+        audioUrl: audioUrl,
+        jobId: jobId,
+        message: "Dub generated successfully",
+        provider: provider,
+        targetLanguage: selectedTargetLanguage,
+        voiceModel: selectedVoiceModel,
+        creditsUsed: requiredCredits,
+        creditsRemaining: deductResult.credits
+      });
+      
+    } finally {
+      // Ensure lock is always released, even on error
+      if (isLocked) {
+        userLocks.delete(userId);
+        if (lockResolver) lockResolver();
+      }
+    }
 
   } catch (error) {
     console.error('❌ Dubbing error:', error);
+    
+    // Release lock on error
+    if (isLocked) {
+      userLocks.delete(userId);
+      if (lockResolver) lockResolver();
+    }
+    
+    // If credits were deducted but generation failed, we keep the deduction
+    // (this is intentional - credits are consumed even if generation fails)
     
     if (req.file && fs.existsSync(req.file.path)) {
       fs.unlinkSync(req.file.path);
@@ -975,7 +1160,7 @@ async function generateDubWithElevenLabs(file, targetLanguage, jobId) {
   }
 }
 
-async function generateDubWithOpenAI(file, targetLanguage, jobId) {
+async function generateDubWithOpenAI(file, targetLanguage, voiceModel, jobId) {
   const API_KEY = process.env.OPENAI_API_KEY;
   
   const sampleText = {
@@ -987,10 +1172,11 @@ async function generateDubWithOpenAI(file, targetLanguage, jobId) {
   };
 
   const text = sampleText[targetLanguage] || sampleText['en'];
-  const voice = 'alloy';
+  // Use the voiceModel parameter (default: 'nova' if not provided)
+  const voice = voiceModel || 'nova';
   const model = 'gpt-4o-mini-tts';
 
-  console.log(`🔊 Using OpenAI TTS — model: ${model}, voice: ${voice}`);
+  console.log(`🔊 Using OpenAI TTS — model: ${model}, voice: ${voice}, language: ${targetLanguage}`);
 
   try {
     const response = await fetch('https://api.openai.com/v1/audio/speech', {
@@ -1063,6 +1249,32 @@ const mockHistory = [
   }
 ];
 
+app.get("/api/dubbing/history", (req, res) => {
+  try {
+    // Get userId from headers (placeholder for future authentication)
+    const userId = req.headers['x-user-id'] || 'anonymous';
+    
+    // Get dubbing history for the user
+    const history = getDubbingHistory(userId);
+    
+    console.log(`📋 Dubbing history requested for user: ${userId} (${history.length} entries)`);
+    
+    res.status(200).json({
+      ok: true,
+      history: history,
+      total: history.length,
+      userId: userId
+    });
+  } catch (error) {
+    console.error('❌ Dubbing history error:', error);
+    res.status(500).json({
+      ok: false,
+      error: 'Failed to fetch dubbing history',
+      message: error.message
+    });
+  }
+});
+
 app.get("/api/history", (req, res) => {
   try {
     const { language, provider, search } = req.query;
@@ -1131,7 +1343,9 @@ app.use((err, req, res, next) => {
 // ============================================================================
 
 const PORT = process.env.PORT || 10000;
-app.listen(PORT, async () => {
+
+// Configure server timeout to 180 seconds (3 minutes) for long-running OpenAI TTS operations
+const server = app.listen(PORT, async () => {
   const isProduction = process.env.NODE_ENV === 'production';
   
   console.log('\n🚀 ═══════════════════════════════════════════════════════');
@@ -1166,4 +1380,8 @@ app.listen(PORT, async () => {
   
   console.log('\n✅ Server ready to accept requests!\n');
 });
+
+// Set server timeout to 180 seconds (3 minutes) for long-running operations like OpenAI TTS
+server.setTimeout(180000); // 180 seconds = 180000 milliseconds
+console.log('⏱️  Server timeout configured: 180 seconds (3 minutes)');
 
