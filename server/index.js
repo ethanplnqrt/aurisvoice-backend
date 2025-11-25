@@ -20,38 +20,46 @@ dotenv.config();
 const app = express();
 
 const allowedOrigins = [
-  "http://localhost:5173",
   "http://localhost:3000",
-  "https://aurisvoice.vercel.app",
-  "https://aurisvoice-h8y5yuebt-ethanplnqrts-projects.vercel.app",
-  "https://aurisvoice-backend.onrender.com"
+  "https://aurisvoice.com",
+  "https://www.aurisvoice.com",
+  "https://aurisvoice-frontend.vercel.app",
 ];
-
-// Pattern matching for all dynamic Vercel preview URLs:
-const vercelWildcard = /^https:\/\/[a-z0-9-]+\.vercel\.app$/;
 
 app.use(
   cors({
-    origin: (origin, callback) => {
-      if (!origin) return callback(null, true);
-
-      if (
-        allowedOrigins.includes(origin) ||
-        vercelWildcard.test(origin)
-      ) {
+    origin: function (origin, callback) {
+      if (!origin) {
+        console.log("🌍 CORS: No origin (mobile/cURL) → allowed");
         return callback(null, true);
       }
 
-      console.log("❌ CORS blocked:", origin);
-      return callback(new Error("CORS blocked for: " + origin), false);
+      if (allowedOrigins.includes(origin)) {
+        console.log("🟢 CORS ALLOWED:", origin);
+        return callback(null, true);
+      } else {
+        console.log("❌ CORS BLOCKED:", origin);
+        return callback(new Error("CORS not allowed"));
+      }
     },
+    methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allowedHeaders: [
+      "Content-Type",
+      "Authorization",
+      "x-user-id"
+    ],
+    exposedHeaders: ["X-RateLimit-Remaining"],
     credentials: true,
-    methods: ["GET", "POST", "PUT", "DELETE"],
-    allowedHeaders: ["Content-Type", "Authorization"],
   })
 );
 
-app.options("*", cors());
+app.options("*", cors()); // Enable preflight globally
+
+// Add header support
+app.use((req, res, next) => {
+  res.header("Access-Control-Allow-Headers", "Content-Type, Authorization, x-user-id");
+  next();
+});
 
 console.log("✅ CORS system loaded.");
 
@@ -845,6 +853,87 @@ app.get("/api/credit", async (req, res) => {
   }
 });
 
+// ============================================================================
+// LISTES BLANCHES POUR VALIDATION LANGUE & VOIX
+// ============================================================================
+
+// Langues supportées (codes ISO avec locale, ex: "fr-FR", "en-US")
+const SUPPORTED_LANGUAGES_BACKEND = [
+  'fr-FR', 'fr-CA', 'fr-BE', 'fr-CH',
+  'en-US', 'en-GB', 'en-AU', 'en-CA',
+  'es-ES', 'es-MX', 'es-AR',
+  'pt-PT', 'pt-BR',
+  'it-IT', 'de-DE', 'nl-NL', 'sv-SE', 'no-NO', 'da-DK', 'fi-FI', 'pl-PL', 'cs-CZ', 'el-GR',
+  'ja-JP', 'ko-KR', 'zh-CN', 'zh-HK', 'hi-IN', 'id-ID', 'th-TH', 'vi-VN',
+  'ar-SA', 'ar-EG', 'tr-TR'
+];
+
+// Codes de langue courts pour compatibilité (ex: "fr", "en")
+const LANGUAGE_CODE_MAP = {
+  'fr-FR': 'fr', 'fr-CA': 'fr', 'fr-BE': 'fr', 'fr-CH': 'fr',
+  'en-US': 'en', 'en-GB': 'en', 'en-AU': 'en', 'en-CA': 'en',
+  'es-ES': 'es', 'es-MX': 'es', 'es-AR': 'es',
+  'pt-PT': 'pt', 'pt-BR': 'pt',
+  'it-IT': 'it', 'de-DE': 'de', 'nl-NL': 'nl', 'sv-SE': 'sv', 'no-NO': 'no', 'da-DK': 'da', 'fi-FI': 'fi', 'pl-PL': 'pl', 'cs-CZ': 'cs', 'el-GR': 'el',
+  'ja-JP': 'ja', 'ko-KR': 'ko', 'zh-CN': 'zh', 'zh-HK': 'zh', 'hi-IN': 'hi', 'id-ID': 'id', 'th-TH': 'th', 'vi-VN': 'vi',
+  'ar-SA': 'ar', 'ar-EG': 'ar', 'tr-TR': 'tr'
+};
+
+// Voix OpenAI TTS supportées
+const SUPPORTED_VOICES_BACKEND = [
+  'alloy', 'nova', 'shimmer', 'verse', 'echo', 'fable', 'onyx', 'wind', 'robotic', 'sage', 'coral'
+];
+
+// Fonction de validation et normalisation de la langue
+function validateAndNormalizeLanguage(languageCode) {
+  const DEFAULT_LANGUAGE = 'en-US';
+  const DEFAULT_LANGUAGE_SHORT = 'en';
+  
+  if (!languageCode || typeof languageCode !== 'string') {
+    return { resolved: DEFAULT_LANGUAGE, short: DEFAULT_LANGUAGE_SHORT, original: null };
+  }
+  
+  const normalized = languageCode.trim();
+  
+  // Vérifier si c'est un code complet (ex: "fr-FR")
+  if (SUPPORTED_LANGUAGES_BACKEND.includes(normalized)) {
+    const shortCode = LANGUAGE_CODE_MAP[normalized] || DEFAULT_LANGUAGE_SHORT;
+    return { resolved: normalized, short: shortCode, original: normalized };
+  }
+  
+  // Vérifier si c'est un code court (ex: "fr") - compatibilité avec ancien format
+  const matchingFullCode = Object.keys(LANGUAGE_CODE_MAP).find(
+    key => LANGUAGE_CODE_MAP[key] === normalized.toLowerCase()
+  );
+  
+  if (matchingFullCode) {
+    return { resolved: matchingFullCode, short: normalized.toLowerCase(), original: normalized };
+  }
+  
+  // Fallback sur défaut
+  console.warn(`⚠️  Langue non supportée: ${normalized}, fallback sur ${DEFAULT_LANGUAGE}`);
+  return { resolved: DEFAULT_LANGUAGE, short: DEFAULT_LANGUAGE_SHORT, original: normalized };
+}
+
+// Fonction de validation de la voix
+function validateVoice(voiceId) {
+  const DEFAULT_VOICE = 'nova';
+  
+  if (!voiceId || typeof voiceId !== 'string') {
+    return { resolved: DEFAULT_VOICE, original: null };
+  }
+  
+  const normalized = voiceId.trim().toLowerCase();
+  
+  if (SUPPORTED_VOICES_BACKEND.includes(normalized)) {
+    return { resolved: normalized, original: voiceId };
+  }
+  
+  // Fallback sur défaut
+  console.warn(`⚠️  Voix non supportée: ${voiceId}, fallback sur ${DEFAULT_VOICE}`);
+  return { resolved: DEFAULT_VOICE, original: voiceId };
+}
+
 app.post("/api/dub", apiLimiter, upload.single('file'), async (req, res) => {
   // Get userId early for lock management
   const userId = req.headers['x-user-id'] || 'anonymous';
@@ -860,18 +949,23 @@ app.post("/api/dub", apiLimiter, upload.single('file'), async (req, res) => {
     }
 
     // Extract parameters from req.body (Multer places non-file fields here)
+    // Le frontend envoie "targetLanguage" (format "fr-FR") et "voiceModel" (ex: "nova")
     const { targetLanguage, sourceLanguage, voiceModel } = req.body;
     
-    // Set default values
-    const selectedTargetLanguage = targetLanguage || 'en'; // Default: English
-    const selectedVoiceModel = voiceModel || 'nova'; // Default: Premium voice
+    // Validation et normalisation de la langue
+    const languageValidation = validateAndNormalizeLanguage(targetLanguage);
+    const selectedTargetLanguage = languageValidation.short; // Code court pour OpenAI TTS
+    const selectedLanguageCode = languageValidation.resolved; // Code complet pour logs
     
-    // Log de débogage en français
-    console.log(`🎯 Paramètres de doublage — Langue cible: ${selectedTargetLanguage}, Voix: ${selectedVoiceModel}`);
-    console.log(`📁 File uploaded: ${req.file.filename}`);
-    console.log(`🌍 Target language: ${selectedTargetLanguage}`);
-    console.log(`🎤 Voice model: ${selectedVoiceModel}`);
-    console.log(`📊 File size: ${(req.file.size / 1024 / 1024).toFixed(2)} MB`);
+    // Validation et normalisation de la voix
+    const voiceValidation = validateVoice(voiceModel);
+    const selectedVoiceModel = voiceValidation.resolved;
+    
+    // Logs explicites en français
+    console.log(`[DUBBING] Requête reçue — userId: ${userId}`);
+    console.log(`[DUBBING] Langue demandée: ${languageValidation.original || 'non spécifiée'} → résolue: ${selectedLanguageCode} (code court: ${selectedTargetLanguage})`);
+    console.log(`[DUBBING] Voix demandée: ${voiceValidation.original || 'non spécifiée'} → résolue: ${selectedVoiceModel}`);
+    console.log(`[DUBBING] Fichier: ${req.file.filename} (${(req.file.size / 1024 / 1024).toFixed(2)} MB)`);
 
     const jobId = Date.now().toString();
     
@@ -1005,7 +1099,8 @@ app.post("/api/dub", apiLimiter, upload.single('file'), async (req, res) => {
         audioUrl = await generateDubWithElevenLabs(req.file, selectedTargetLanguage, jobId);
         provider = "elevenlabs";
       } else if (hasOpenAI && hasSufficientCredit) {
-        console.log('🤖 Using OpenAI TTS for dubbing...');
+        console.log(`🤖 Using OpenAI TTS for dubbing...`);
+        console.log(`[DUBBING] Configuration finale — Langue: ${selectedLanguageCode} (${selectedTargetLanguage}), Voix: ${selectedVoiceModel}`);
         audioUrl = await generateDubWithOpenAI(req.file, selectedTargetLanguage, selectedVoiceModel, jobId);
         provider = "openai";
       }
@@ -1032,13 +1127,15 @@ app.post("/api/dub", apiLimiter, upload.single('file'), async (req, res) => {
       if (lockResolver) lockResolver();
       isLocked = false;
 
+      console.log(`[DUBBING] ✅ Doublage généré avec succès — Langue: ${selectedLanguageCode}, Voix: ${selectedVoiceModel}, Provider: ${provider}`);
+      
       res.json({
         ok: true,
         audioUrl: audioUrl,
         jobId: jobId,
         message: "Dub generated successfully",
         provider: provider,
-        targetLanguage: selectedTargetLanguage,
+        targetLanguage: selectedLanguageCode, // Code complet pour le frontend
         voiceModel: selectedVoiceModel,
         creditsUsed: requiredCredits,
         creditsRemaining: deductResult.credits
@@ -1163,20 +1260,27 @@ async function generateDubWithElevenLabs(file, targetLanguage, jobId) {
 async function generateDubWithOpenAI(file, targetLanguage, voiceModel, jobId) {
   const API_KEY = process.env.OPENAI_API_KEY;
   
+  // Mapping de textes d'exemple par code de langue court
   const sampleText = {
     'fr': 'Bienvenue sur AurisVoice, la plateforme de doublage vocal par intelligence artificielle.',
     'en': 'Welcome to AurisVoice, the AI-powered voice dubbing platform.',
     'es': 'Bienvenido a AurisVoice, la plataforma de doblaje de voz con inteligencia artificial.',
     'de': 'Willkommen bei AurisVoice, der KI-gestützten Sprachsynchronisationsplattform.',
-    'it': 'Benvenuti su AurisVoice, la piattaforma di doppiaggio vocale basata su intelligenza artificiale.'
+    'it': 'Benvenuti su AurisVoice, la piattaforma di doppiaggio vocale basata su intelligenza artificiale.',
+    'pt': 'Bem-vindo ao AurisVoice, a plataforma de dublagem de voz com inteligência artificial.',
+    'nl': 'Welkom bij AurisVoice, het AI-gestuurde stemdubbingplatform.',
+    'ja': 'AurisVoiceへようこそ、AIを活用した音声吹き替えプラットフォームです。',
+    'ko': 'AurisVoice에 오신 것을 환영합니다. AI 기반 음성 더빙 플랫폼입니다.',
+    'zh': '欢迎使用AurisVoice，AI驱动的语音配音平台。',
+    'ar': 'مرحباً بك في AurisVoice، منصة الدبلجة الصوتية المدعومة بالذكاء الاصطناعي.'
   };
 
+  // targetLanguage est déjà un code court (ex: "fr", "en") après validation
   const text = sampleText[targetLanguage] || sampleText['en'];
-  // Use the voiceModel parameter (default: 'nova' if not provided)
-  const voice = voiceModel || 'nova';
+  const voice = voiceModel; // Déjà validé et normalisé
   const model = 'gpt-4o-mini-tts';
 
-  console.log(`🔊 Using OpenAI TTS — model: ${model}, voice: ${voice}, language: ${targetLanguage}`);
+  console.log(`🔊 [OpenAI TTS] Appel API — model: ${model}, voice: ${voice}, language: ${targetLanguage}`);
 
   try {
     const response = await fetch('https://api.openai.com/v1/audio/speech', {
