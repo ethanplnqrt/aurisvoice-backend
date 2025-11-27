@@ -497,6 +497,41 @@ app.get('/api/credits', (req, res) => {
   }
 });
 
+// Route alias: /credits/:userId
+app.get('/credits/:userId', (req, res) => {
+  try {
+    const { userId } = req.params;
+    const result = getCredits();
+    
+    if (!result.ok) {
+      return res.status(500).json({
+        ok: false,
+        error: 'Failed to retrieve credits'
+      });
+    }
+    
+    const credits = typeof result.credits === 'number' ? result.credits : 0;
+    const history = Array.isArray(result.history) ? result.history : [];
+    
+    if (process.env.NODE_ENV !== 'production') {
+      console.log(`💰 Credits retrieved for user ${userId}: ${credits}`);
+    }
+    
+    res.json({
+      ok: true,
+      userId: userId,
+      credits: credits,
+      history: history.slice(-10)
+    });
+  } catch (error) {
+    console.error('❌ Credits error:', error);
+    res.status(500).json({
+      ok: false,
+      error: error.message || 'Internal server error'
+    });
+  }
+});
+
 app.post('/api/stripe/checkout', express.json(), async (req, res) => {
   try {
     const { plan } = req.body;
@@ -554,7 +589,8 @@ app.post('/api/stripe/checkout', express.json(), async (req, res) => {
   }
 });
 
-app.post('/api/stripe/webhook', 
+// Webhook handler function (shared for both routes)
+const handleWebhook = async (req, res) => { 
   express.raw({ type: 'application/json' }),
   async (req, res) => {
     // Log d'événement reçu (au tout début du handler)
@@ -806,7 +842,11 @@ app.post('/api/stripe/webhook',
       });
     }
   }
-);
+};
+
+// Register routes: /webhook and /api/stripe/webhook
+app.post('/webhook', express.raw({ type: 'application/json' }), handleWebhook);
+app.post('/api/stripe/webhook', express.raw({ type: 'application/json' }), handleWebhook);
 
 app.get('/api/plans', (req, res) => {
   const plans = Object.entries(PRICING_PLANS).map(([key, value]) => ({
@@ -934,7 +974,8 @@ function validateVoice(voiceId) {
   return { resolved: DEFAULT_VOICE, original: voiceId };
 }
 
-app.post("/api/dub", apiLimiter, upload.single('file'), async (req, res) => {
+// Dub handler function (shared for both routes)
+const handleDubRequest = async (req, res) => {
   // Get userId early for lock management
   const userId = req.headers['x-user-id'] || 'anonymous';
   let isLocked = false;
@@ -1179,7 +1220,11 @@ app.post("/api/dub", apiLimiter, upload.single('file'), async (req, res) => {
       details: process.env.NODE_ENV === 'development' ? error.stack : undefined
     });
   }
-});
+};
+
+// Register routes: /create-dub and /api/dub
+app.post("/create-dub", apiLimiter, upload.single('file'), handleDubRequest);
+app.post("/api/dub", apiLimiter, upload.single('file'), handleDubRequest);
 
 async function generateMockDub(file, targetLanguage, jobId) {
   console.log('🎭 Generating mock dub...');
@@ -1416,6 +1461,186 @@ app.get("/api/history", (req, res) => {
   }
 });
 
+// Route alias: /history/:userId
+app.get("/history/:userId", (req, res) => {
+  try {
+    const { userId } = req.params;
+    const { language, provider, search } = req.query;
+    
+    // Get dubbing history for the user
+    const userHistory = getDubbingHistory(userId);
+    
+    let filtered = [...userHistory];
+
+    if (language && language !== 'all') {
+      filtered = filtered.filter(p => p.lang === language);
+    }
+
+    if (provider && provider !== 'all') {
+      filtered = filtered.filter(p => p.provider === provider);
+    }
+
+    if (search) {
+      const query = search.toString().toLowerCase();
+      filtered = filtered.filter(p => 
+        p.inputName && p.inputName.toLowerCase().includes(query)
+      );
+    }
+
+    console.log(`📋 History requested for user ${userId}: ${filtered.length} entries`);
+
+    res.json({
+      ok: true,
+      userId: userId,
+      history: filtered,
+      total: filtered.length
+    });
+  } catch (error) {
+    console.error('❌ History error:', error);
+    res.status(500).json({
+      ok: false,
+      error: 'Failed to fetch history'
+    });
+  }
+});
+
+// ============================================================================
+// ADMIN ROUTES
+// ============================================================================
+
+// Admin middleware to check x-admin-secret header
+const adminAuth = (req, res, next) => {
+  const adminSecret = req.headers['x-admin-secret'];
+  const expectedSecret = process.env.ADMIN_SECRET;
+  
+  if (!expectedSecret) {
+    console.error('❌ ADMIN_SECRET not configured in environment');
+    return res.status(500).json({
+      ok: false,
+      error: 'Admin authentication not configured'
+    });
+  }
+  
+  if (!adminSecret || adminSecret !== expectedSecret) {
+    console.warn(`⚠️  Unauthorized admin access attempt from ${req.ip}`);
+    return res.status(401).json({
+      ok: false,
+      error: 'Unauthorized: Invalid admin secret'
+    });
+  }
+  
+  next();
+};
+
+// POST /admin/add-credits - Add credits to a specific user
+app.post('/admin/add-credits', adminAuth, express.json(), (req, res) => {
+  try {
+    const { userId, credits } = req.body;
+    
+    // Validate body
+    if (!userId || typeof userId !== 'string' || userId.trim() === '') {
+      return res.status(400).json({
+        ok: false,
+        error: 'Invalid userId: must be a non-empty string'
+      });
+    }
+    
+    if (typeof credits !== 'number' || credits <= 0 || !Number.isInteger(credits)) {
+      return res.status(400).json({
+        ok: false,
+        error: 'Invalid credits: must be a positive integer'
+      });
+    }
+    
+    // Load credits.json
+    const creditsFilePath = join(__dirname, 'credits.json');
+    let creditsData;
+    
+    try {
+      if (fs.existsSync(creditsFilePath)) {
+        const fileContent = fs.readFileSync(creditsFilePath, 'utf8');
+        creditsData = JSON.parse(fileContent);
+      } else {
+        creditsData = { users: {} };
+      }
+    } catch (error) {
+      console.error('❌ Error reading credits.json:', error);
+      return res.status(500).json({
+        ok: false,
+        error: 'Failed to read credits file'
+      });
+    }
+    
+    // Initialize users object if it doesn't exist (backward compatibility)
+    if (!creditsData.users) {
+      creditsData.users = {};
+    }
+    
+    // If userId does not exist → create an entry with "credits": 0
+    if (!creditsData.users[userId]) {
+      creditsData.users[userId] = {
+        credits: 0,
+        history: []
+      };
+      console.log(`👤 Created new user entry for ${userId}`);
+    }
+    
+    // Get current balance
+    const oldBalance = creditsData.users[userId].credits || 0;
+    const newBalance = oldBalance + credits;
+    
+    // Add credits to user's balance
+    creditsData.users[userId].credits = newBalance;
+    
+    // Add to history
+    if (!creditsData.users[userId].history) {
+      creditsData.users[userId].history = [];
+    }
+    
+    creditsData.users[userId].history.push({
+      type: 'admin_add',
+      amount: credits,
+      oldBalance: oldBalance,
+      newBalance: newBalance,
+      date: new Date().toISOString(),
+      description: `Admin manual credit addition`
+    });
+    
+    // Keep only last 100 transactions per user
+    if (creditsData.users[userId].history.length > 100) {
+      creditsData.users[userId].history = creditsData.users[userId].history.slice(-100);
+    }
+    
+    // Save credits.json
+    try {
+      fs.writeFileSync(creditsFilePath, JSON.stringify(creditsData, null, 2));
+      console.log(`✅ Admin added ${credits} credits to user ${userId} (${oldBalance} → ${newBalance})`);
+    } catch (error) {
+      console.error('❌ Error writing credits.json:', error);
+      return res.status(500).json({
+        ok: false,
+        error: 'Failed to save credits file'
+      });
+    }
+    
+    // Return success response
+    res.json({
+      ok: true,
+      message: 'Credits added successfully',
+      userId: userId,
+      creditsAdded: credits,
+      newBalance: newBalance
+    });
+    
+  } catch (error) {
+    console.error('❌ Admin add-credits error:', error);
+    res.status(500).json({
+      ok: false,
+      error: error.message || 'Internal server error'
+    });
+  }
+});
+
 // ============================================================================
 // ERROR HANDLING
 // ============================================================================
@@ -1446,10 +1671,12 @@ app.use((err, req, res, next) => {
 // START SERVER
 // ============================================================================
 
-const PORT = process.env.PORT || 10000;
+const PORT = process.env.PORT || 3001;
 
 // Configure server timeout to 180 seconds (3 minutes) for long-running OpenAI TTS operations
 const server = app.listen(PORT, async () => {
+  console.log("AurisVoice backend running on port", PORT);
+  
   const isProduction = process.env.NODE_ENV === 'production';
   
   console.log('\n🚀 ═══════════════════════════════════════════════════════');

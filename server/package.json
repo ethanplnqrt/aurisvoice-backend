@@ -5,15 +5,18 @@
   "main": "index.js",
   "scripts": {
     "start": "node index.js",
-    "dev": "node index.js"
+    "dev": "nodemon index.js"
   },
   "dependencies": {
-    "cors": "latest",
-    "dotenv": "latest",
-    "express": "latest",
+    "axios": "^1.7.9",
+    "body-parser": "^1.20.3",
+    "cors": "^2.8.5",
+    "dotenv": "^17.2.3",
+    "express": "^4.21.2",
     "express-rate-limit": "^8.2.1",
-    "fs-extra": "latest",
-    "multer": "latest",
-    "stripe": "latest"
+    "fs-extra": "^11.2.0",
+    "multer": "^1.4.5-lts.1",
+    "nodemon": "^3.1.10",
+    "stripe": "^19.3.1"
   }
 }
