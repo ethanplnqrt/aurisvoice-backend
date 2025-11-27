@@ -11,6 +11,7 @@ import { fileURLToPath } from 'url';
 import { dirname, join, extname } from 'path';
 import fs from 'fs';
 import { getCredits, addCredits, deductCredits, hasEnoughCredits, calculateCreditsNeeded } from './credits.js';
+import { sendEmail } from './utils/email.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -643,7 +644,31 @@ const handleWebhook = async (req, res) => {
     if (credits > 0) {
       const result = addCredits(credits, `Achat Stripe (session: ${sessionId})`);
       
-      if (!result.ok) {
+      if (result.ok) {
+        console.log(`💰 Succès Webhook : Crédits ajoutés — Session ID: ${sessionId}, Crédits: ${credits}`);
+        
+        // Vérification solde Stripe
+        try {
+          const balance = await stripe.balance.retrieve();
+          const available = balance.available[0]?.amount / 100;
+
+          if (available < 20) {
+            await sendEmail(
+              'ethan.plnqrt@gmail.com',
+              '⚠️ AurisVoice – Solde Stripe faible',
+              `
+                <h2>Alerte automatique AurisVoice</h2>
+                <p>Ton solde Stripe est passé sous <strong>20€</strong>.</p>
+                <p>Solde actuel : <strong>${available}€</strong></p>
+                <p>Pense à recharger ton compte pour éviter les interruptions.</p>
+              `
+            );
+            console.log('📧 Alerte email envoyée : solde Stripe faible');
+          }
+        } catch (err) {
+          console.error('❌ Erreur vérification solde Stripe:', err);
+        }
+      } else {
         console.error('[Stripe] Erreur ajout crédits:', result.error);
       }
     }
