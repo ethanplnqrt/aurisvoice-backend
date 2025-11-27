@@ -92,10 +92,11 @@ const stripe = new Stripe(STRIPE_SECRET_KEY, {
   apiVersion: '2024-11-20.acacia',
 });
 
-// 1. RAW body EXCLUSIVEMENT pour Stripe webhook
+// 1. RAW body EXCLUSIVEMENT pour Stripe webhook (doit être AVANT express.json())
 app.use('/api/stripe/webhook', express.raw({ type: 'application/json' }));
+app.use('/webhook', express.raw({ type: 'application/json' }));
 
-// 2. JSON parser pour toutes les autres routes
+// 2. JSON parser pour toutes les autres routes (ne s'applique pas au webhook)
 app.use(express.json());
 
 // Serve static files from output directory
@@ -140,6 +141,18 @@ const apiLimiter = rateLimit({
   standardHeaders: true, // Return rate limit info in the `RateLimit-*` headers
   legacyHeaders: false, // Disable the `X-RateLimit-*` headers
   statusCode: 429 // HTTP status code for rate limit exceeded
+});
+
+// Rate limiter for Stripe webhook (production security)
+const webhookLimiter = rateLimit({
+  windowMs: 60 * 1000, // 1 minute
+  max: 5, // Maximum 5 requests per minute per IP
+  message: {
+    error: 'Too many webhook requests'
+  },
+  standardHeaders: false, // Pas de headers inutiles
+  legacyHeaders: false,
+  statusCode: 429
 });
 
 // ============================================================================
@@ -282,9 +295,9 @@ function checkRateLimit(ip) {
   return { allowed: true, remaining: webhookRateLimit.maxRequests - record.count };
 }
 
-// Processed events Set to prevent double crediting
+// Anti-replay: Set to prevent double processing of Stripe events
 const processedEvents = new Set();
-const MAX_PROCESSED_EVENTS = 200;
+const MAX_PROCESSED_EVENTS = 1000; // Increased for production
 
 // User lock system to prevent race conditions in credit deduction
 const userLocks = new Map(); // userId -> Promise resolver
@@ -589,48 +602,70 @@ app.post('/api/stripe/checkout', express.json(), async (req, res) => {
   }
 });
 
-// Webhook handler function (shared for both routes)
+// Webhook handler function (shared for both routes) - Production ready
 const handleWebhook = async (req, res) => {
-  const clientIp = req.ip || req.connection?.remoteAddress || 'unknown';
   const sig = req.headers['stripe-signature'];
   const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
 
+  // 1. Vérification du secret configuré
   if (!webhookSecret) {
-    console.error('❌ STRIPE_WEBHOOK_SECRET manquant');
-    return res.status(500).json({ ok: false, error: 'Webhook secret non configuré' });
+    return res.status(500).json({ ok: false, error: 'Webhook secret not configured' });
   }
 
+  // 2. Vérification de la signature header
+  if (!sig) {
+    return res.status(400).json({ ok: false, error: 'Invalid signature' });
+  }
+
+  // 3. Vérification signature stricte avec Stripe
   let event;
   try {
     event = stripe.webhooks.constructEvent(req.body, sig, webhookSecret);
   } catch (err) {
-    console.error('❌ Invalid signature:', err.message, 'IP:', clientIp);
     return res.status(400).json({ ok: false, error: 'Invalid signature' });
   }
 
-  console.log('⚡ Webhook reçu :', event.type);
+  // 4. Anti-replay: Vérifier si l'événement a déjà été traité
+  if (event.id && processedEvents.has(event.id)) {
+    return res.status(200).json({ ok: true, duplicate: true });
+  }
 
+  // 5. Log propre (uniquement le type d'événement)
+  console.log('[Stripe] Webhook reçu:', event.type);
+
+  // 6. Traitement de l'événement checkout.session.completed
   if (event.type === 'checkout.session.completed') {
     const session = event.data.object;
+    const sessionId = session.id;
+    const customerEmail = session.customer_email || session.customer_details?.email;
     const credits = parseInt(session?.metadata?.credits || '0', 10);
 
     if (credits > 0) {
-      const result = addCredits(credits, `Achat Stripe (session: ${session.id})`);
+      const result = addCredits(credits, `Achat Stripe (session: ${sessionId})`);
       
-      if (result.ok) {
-        console.log(`💰 Crédits ajoutés via webhook : ${credits} crédits (session: ${session.id})`);
-      } else {
-        console.error(`❌ Erreur lors de l'ajout de crédits : ${result.error}`);
+      if (!result.ok) {
+        console.error('[Stripe] Erreur ajout crédits:', result.error);
       }
     }
   }
 
-  return res.json({ ok: true });
+  // 7. Ajouter l'événement au Set anti-replay
+  if (event.id) {
+    processedEvents.add(event.id);
+    // Nettoyer le Set si trop grand (garder les 1000 derniers)
+    if (processedEvents.size > MAX_PROCESSED_EVENTS) {
+      const firstEvent = Array.from(processedEvents)[0];
+      processedEvents.delete(firstEvent);
+    }
+  }
+
+  // 8. Retourner 200 pour tous les événements valides
+  return res.status(200).json({ ok: true });
 };
 
-// Register routes: /webhook and /api/stripe/webhook
-app.post('/webhook', express.raw({ type: 'application/json' }), handleWebhook);
-app.post('/api/stripe/webhook', express.raw({ type: 'application/json' }), handleWebhook);
+// Register routes: /webhook and /api/stripe/webhook (sécurisées)
+app.post('/webhook', webhookLimiter, handleWebhook);
+app.post('/api/stripe/webhook', webhookLimiter, handleWebhook);
 
 app.get('/api/plans', (req, res) => {
   const plans = Object.entries(PRICING_PLANS).map(([key, value]) => ({
@@ -1499,4 +1534,5 @@ const server = app.listen(PORT, async () => {
 // Set server timeout to 180 seconds (3 minutes) for long-running operations like OpenAI TTS
 server.setTimeout(180000); // 180 seconds = 180000 milliseconds
 console.log('⏱️  Server timeout configured: 180 seconds (3 minutes)');
+
 
