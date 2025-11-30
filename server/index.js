@@ -25,6 +25,7 @@ const allowedOrigins = [
   "https://aurisvoice.com",
   "https://www.aurisvoice.com",
   "https://aurisvoice-frontend.vercel.app",
+  "https://aurisvoice-frontend-h4bkpufcn-ethanplnqrts-projects.vercel.app",
 ];
 
 app.use(
