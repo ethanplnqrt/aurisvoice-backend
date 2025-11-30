@@ -1223,21 +1223,30 @@ async function generateDubWithOpenAI(file, targetLanguage, voiceModel, jobId) {
 // PREVIEW VOICE ROUTE
 // ============================================================================
 
-// Helper function to generate voice preview with OpenAI TTS
-async function generateVoicePreview(voiceId) {
-  const API_KEY = process.env.OPENAI_API_KEY;
-  
-  if (!API_KEY) {
-    throw new Error('OpenAI API key not configured');
-  }
-
-  // Preview text
-  const previewText = 'Preview sample';
-  const model = 'gpt-4o-mini-tts';
-
-  console.log(`🔊 [Preview] Generating preview — model: ${model}, voice: ${voiceId}`);
-
+app.get('/api/preview-voice', async (req, res) => {
   try {
+    const voiceId = req.query.voice_id;
+
+    if (!voiceId) {
+      return res.status(400).json({
+        ok: false,
+        error: "Missing voice_id"
+      });
+    }
+
+    // Exemple de phrase courte
+    const previewText = "This is a preview.";
+
+    // OpenAI TTS
+    const API_KEY = process.env.OPENAI_API_KEY;
+    
+    if (!API_KEY) {
+      return res.status(500).json({
+        ok: false,
+        error: "OpenAI API key not configured"
+      });
+    }
+
     const response = await fetch('https://api.openai.com/v1/audio/speech', {
       method: 'POST',
       headers: {
@@ -1245,97 +1254,32 @@ async function generateVoicePreview(voiceId) {
         'Content-Type': 'application/json'
       },
       body: JSON.stringify({
-        model: model,
-        input: previewText,
+        model: "gpt-4o-mini-tts",
         voice: voiceId,
+        input: previewText,
         response_format: 'mp3'
       })
     });
 
     if (!response.ok) {
       const errorText = await response.text();
-      throw new Error(`OpenAI API error: ${response.status} ${response.statusText} - ${errorText}`);
+      console.error("OpenAI API error:", response.status, errorText);
+      return res.status(500).json({
+        ok: false,
+        error: "Failed to generate preview"
+      });
     }
 
     const audioBuffer = await response.arrayBuffer();
-    return Buffer.from(audioBuffer);
+    const buffer = Buffer.from(audioBuffer);
 
-  } catch (error) {
-    console.error('OpenAI Preview API error:', error);
-    throw new Error('Failed to generate voice preview');
-  }
-}
-
-// GET /api/preview-voice - Generate or return cached voice preview
-app.get('/api/preview-voice', previewLimiter, async (req, res) => {
-  try {
-    const { voice_id } = req.query;
-
-    // Validate voice_id parameter
-    if (!voice_id || typeof voice_id !== 'string' || voice_id.trim() === '') {
-      return res.status(400).json({
-        ok: false,
-        error: 'Missing voice_id'
-      });
-    }
-
-    // Validate and normalize voice using same function as dubbing routes
-    const voiceValidation = validateVoice(voice_id);
-    const normalizedVoiceId = voiceValidation.resolved;
-
-    console.log(`🎵 [Preview] Request received — voice_id: ${voice_id} → normalized: ${normalizedVoiceId}`);
-
-    // Cache file path
-    const cacheFileName = `preview_${normalizedVoiceId}.mp3`;
-    const cacheFilePath = join(cacheDir, cacheFileName);
-
-    // Check if cached preview exists
-    if (fs.existsSync(cacheFilePath)) {
-      console.log(`✅ [Preview] Returning cached preview: ${cacheFileName}`);
-      
-      // Read cached file and return
-      const cachedAudio = fs.readFileSync(cacheFilePath);
-      
-      res.setHeader('Content-Type', 'audio/mpeg');
-      res.setHeader('Content-Length', cachedAudio.length);
-      res.setHeader('Cache-Control', 'public, max-age=31536000'); // Cache for 1 year
-      
-      return res.send(cachedAudio);
-    }
-
-    // Generate new preview
-    console.log(`🔄 [Preview] Generating new preview for voice: ${normalizedVoiceId}`);
-    
-    const hasOpenAI = !!process.env.OPENAI_API_KEY;
-
-    if (!hasOpenAI) {
-      return res.status(503).json({
-        ok: false,
-        error: 'OpenAI API key not configured'
-      });
-    }
-
-    // Generate preview audio (no credits consumed from user balance)
-    const audioBuffer = await generateVoicePreview(normalizedVoiceId);
-
-    // Save to cache
-    fs.writeFileSync(cacheFilePath, audioBuffer);
-    console.log(`✅ [Preview] Preview generated and cached: ${cacheFileName}`);
-
-    // Return audio file
-    res.setHeader('Content-Type', 'audio/mpeg');
-    res.setHeader('Content-Length', audioBuffer.length);
-    res.setHeader('Cache-Control', 'public, max-age=31536000'); // Cache for 1 year
-    
-    return res.send(audioBuffer);
-
-  } catch (error) {
-    console.error('❌ Preview error:', error);
-    
+    res.setHeader("Content-Type", "audio/mpeg");
+    res.send(buffer);
+  } catch (err) {
+    console.error("Preview voice error:", err);
     res.status(500).json({
       ok: false,
-      error: error.message || 'Failed to generate voice preview',
-      details: process.env.NODE_ENV === 'development' ? error.stack : undefined
+      error: "Failed to generate preview"
     });
   }
 });
