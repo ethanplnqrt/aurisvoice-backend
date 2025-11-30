@@ -72,11 +72,12 @@ console.log("✅ CORS system loaded.");
 const logsDir = join(__dirname, 'logs');
 const uploadsDir = join(__dirname, 'uploads');
 const outputDir = join(__dirname, 'output');
+const cacheDir = join(__dirname, 'cache', 'previews');
 const logFile = join(logsDir, 'stripe-webhook.log');
 const securityLogFile = join(logsDir, 'stripe-security.log');
 
 // Ensure directories exist
-[logsDir, uploadsDir, outputDir].forEach(dir => {
+[logsDir, uploadsDir, outputDir, cacheDir].forEach(dir => {
   if (!fs.existsSync(dir)) {
     fs.mkdirSync(dir, { recursive: true });
   }
@@ -152,6 +153,18 @@ const webhookLimiter = rateLimit({
     error: 'Too many webhook requests'
   },
   standardHeaders: false, // Pas de headers inutiles
+  legacyHeaders: false,
+  statusCode: 429
+});
+
+// Rate limiter for preview voice endpoint
+const previewLimiter = rateLimit({
+  windowMs: 60 * 1000, // 1 minute
+  max: 20, // Maximum 20 requests per minute per IP
+  message: {
+    error: 'Too many preview requests, please try again after 1 minute.'
+  },
+  standardHeaders: true,
   legacyHeaders: false,
   statusCode: 429
 });
@@ -470,7 +483,8 @@ app.get("/status", (req, res) => {
       webhook: 'POST /api/stripe/webhook',
       plans: 'GET /api/plans',
       dub: 'POST /api/dub',
-      history: 'GET /api/history'
+      history: 'GET /api/history',
+      previewVoice: 'GET /api/preview-voice?voice_id=<voice_id>'
     }
   });
 });
@@ -1204,6 +1218,136 @@ async function generateDubWithOpenAI(file, targetLanguage, voiceModel, jobId) {
     throw new Error('Failed to generate dub with OpenAI');
   }
 }
+
+// ============================================================================
+// PREVIEW VOICE ROUTE
+// ============================================================================
+
+// Helper function to generate voice preview with OpenAI TTS
+async function generateVoicePreview(voiceId) {
+  const API_KEY = process.env.OPENAI_API_KEY;
+  
+  if (!API_KEY) {
+    throw new Error('OpenAI API key not configured');
+  }
+
+  // Preview text (2-3 seconds)
+  const previewText = 'Hello, welcome to AurisVoice.';
+  const model = 'gpt-4o-mini-tts'; // Same model as main dubbing
+
+  console.log(`🔊 [Preview] Generating preview — model: ${model}, voice: ${voiceId}`);
+
+  try {
+    const response = await fetch('https://api.openai.com/v1/audio/speech', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${API_KEY}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        model: model,
+        input: previewText,
+        voice: voiceId,
+        response_format: 'mp3'
+      })
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`OpenAI API error: ${response.status} ${response.statusText} - ${errorText}`);
+    }
+
+    const audioBuffer = await response.arrayBuffer();
+    return Buffer.from(audioBuffer);
+
+  } catch (error) {
+    console.error('OpenAI Preview API error:', error);
+    throw new Error('Failed to generate voice preview');
+  }
+}
+
+// GET /api/preview-voice - Generate or return cached voice preview
+app.get('/api/preview-voice', previewLimiter, async (req, res) => {
+  try {
+    const { voice_id } = req.query;
+
+    // Validate voice_id parameter
+    if (!voice_id || typeof voice_id !== 'string' || voice_id.trim() === '') {
+      return res.status(400).json({
+        ok: false,
+        error: 'Missing or invalid voice_id parameter'
+      });
+    }
+
+    // Validate and normalize voice using same function as dubbing routes
+    const voiceValidation = validateVoice(voice_id);
+    const normalizedVoiceId = voiceValidation.resolved;
+
+    console.log(`🎵 [Preview] Request received — voice_id: ${voice_id} → normalized: ${normalizedVoiceId}`);
+
+    // Cache file path
+    const cacheFileName = `preview_${normalizedVoiceId}.mp3`;
+    const cacheFilePath = join(cacheDir, cacheFileName);
+
+    // Check if cached preview exists
+    if (fs.existsSync(cacheFilePath)) {
+      console.log(`✅ [Preview] Returning cached preview: ${cacheFileName}`);
+      
+      // Read cached file and return
+      const cachedAudio = fs.readFileSync(cacheFilePath);
+      
+      res.setHeader('Content-Type', 'audio/mpeg');
+      res.setHeader('Content-Length', cachedAudio.length);
+      res.setHeader('Cache-Control', 'public, max-age=31536000'); // Cache for 1 year
+      
+      return res.send(cachedAudio);
+    }
+
+    // Generate new preview
+    console.log(`🔄 [Preview] Generating new preview for voice: ${normalizedVoiceId}`);
+    
+    const hasOpenAI = !!process.env.OPENAI_API_KEY;
+    const creditStatus = await getCreditStatus();
+    const hasSufficientCredit = creditRemaining >= MIN_CREDIT;
+
+    if (!hasOpenAI) {
+      return res.status(503).json({
+        ok: false,
+        error: 'OpenAI API key not configured'
+      });
+    }
+
+    if (!hasSufficientCredit) {
+      return res.status(503).json({
+        ok: false,
+        error: 'Insufficient OpenAI credits for preview generation'
+      });
+    }
+
+    // Generate preview audio
+    const audioBuffer = await generateVoicePreview(normalizedVoiceId);
+
+    // Save to cache
+    fs.writeFileSync(cacheFilePath, audioBuffer);
+    console.log(`✅ [Preview] Preview generated and cached: ${cacheFileName}`);
+
+    // Return audio file
+    res.setHeader('Content-Type', 'audio/mpeg');
+    res.setHeader('Content-Length', audioBuffer.length);
+    res.setHeader('Cache-Control', 'public, max-age=31536000'); // Cache for 1 year
+    
+    return res.send(audioBuffer);
+
+  } catch (error) {
+    console.error('❌ Preview error:', error);
+    
+    res.status(500).json({
+      ok: false,
+      error: error.message || 'Failed to generate voice preview',
+      details: process.env.NODE_ENV === 'development' ? error.stack : undefined
+    });
+  }
+});
 
 // ============================================================================
 // HISTORY ROUTES
