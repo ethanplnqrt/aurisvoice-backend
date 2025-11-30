@@ -20,28 +20,29 @@ dotenv.config();
 
 const app = express();
 
-const allowedOrigins = [
+const dynamicAllowedOrigins = [
   "http://localhost:3000",
-  "https://aurisvoice.com",
   "https://www.aurisvoice.com",
+  "https://aurisvoice.com",
   "https://aurisvoice-frontend.vercel.app",
-  "https://aurisvoice-frontend-h4bkpufcn-ethanplnqrts-projects.vercel.app",
+  // Autorise tous les domaines Vercel preview
+  /^https:\/\/aurisvoice-frontend-.*\.vercel\.app$/,
 ];
 
 app.use(
   cors({
-    origin: function (origin, callback) {
-      if (!origin) {
-        console.log("🌍 CORS: No origin (mobile/cURL) → allowed");
-        return callback(null, true);
-      }
+    origin: (origin, callback) => {
+      if (!origin) return callback(null, true); // iOS / mobile etc.
 
-      if (allowedOrigins.includes(origin)) {
-        console.log("🟢 CORS ALLOWED:", origin);
-        return callback(null, true);
+      const isAllowed = dynamicAllowedOrigins.some((rule) =>
+        rule instanceof RegExp ? rule.test(origin) : rule === origin
+      );
+
+      if (isAllowed) {
+        callback(null, true);
       } else {
-        console.log("❌ CORS BLOCKED:", origin);
-        return callback(new Error("CORS not allowed"));
+        console.warn("🚫 CORS BLOCKED:", origin);
+        callback(new Error("Not allowed by CORS"));
       }
     },
     methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
