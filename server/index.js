@@ -48,7 +48,8 @@ app.use(
     allowedHeaders: [
       "Content-Type",
       "Authorization",
-      "x-user-id"
+      "x-user-id",
+      "x-user-email"
     ],
     exposedHeaders: ["X-RateLimit-Remaining"],
     credentials: true,
@@ -59,9 +60,15 @@ app.options("*", cors()); // Enable preflight globally
 
 // Add header support
 app.use((req, res, next) => {
-  res.header("Access-Control-Allow-Headers", "Content-Type, Authorization, x-user-id");
+  res.header("Access-Control-Allow-Headers", "Content-Type, Authorization, x-user-id, x-user-email");
   next();
 });
+
+// Helper function to get stable ID from email
+function getStableId(req) {
+  const email = req.headers["x-user-email"] || "";
+  return email.toLowerCase().trim();
+}
 
 console.log("✅ CORS system loaded.");
 
@@ -496,7 +503,16 @@ app.get("/status", (req, res) => {
 
 app.get('/api/credits', (req, res) => {
   try {
-    const result = getCredits();
+    const stableId = getStableId(req);
+    
+    if (!stableId) {
+      return res.status(400).json({
+        ok: false,
+        error: 'Missing x-user-email header'
+      });
+    }
+    
+    const result = getCredits(stableId);
     
     if (!result.ok) {
       return res.status(500).json({
@@ -509,7 +525,7 @@ app.get('/api/credits', (req, res) => {
     const history = Array.isArray(result.history) ? result.history : [];
     
     if (process.env.NODE_ENV !== 'production') {
-      console.log(`💰 Credits retrieved: ${credits}`);
+      console.log(`💰 Credits retrieved for ${stableId}: ${credits}`);
     }
     
     res.json({
@@ -526,11 +542,19 @@ app.get('/api/credits', (req, res) => {
   }
 });
 
-// Route alias: /credits/:userId
+// Route alias: /credits/:userId (deprecated - use /api/credits with x-user-email header)
 app.get('/credits/:userId', (req, res) => {
   try {
-    const { userId } = req.params;
-    const result = getCredits();
+    const stableId = getStableId(req);
+    
+    if (!stableId) {
+      return res.status(400).json({
+        ok: false,
+        error: 'Missing x-user-email header'
+      });
+    }
+    
+    const result = getCredits(stableId);
     
     if (!result.ok) {
       return res.status(500).json({
@@ -543,12 +567,12 @@ app.get('/credits/:userId', (req, res) => {
     const history = Array.isArray(result.history) ? result.history : [];
     
     if (process.env.NODE_ENV !== 'production') {
-      console.log(`💰 Credits retrieved for user ${userId}: ${credits}`);
+      console.log(`💰 Credits retrieved for ${stableId}: ${credits}`);
     }
     
     res.json({
       ok: true,
-      userId: userId,
+      userId: stableId,
       credits: credits,
       history: history.slice(-10)
     });
@@ -653,14 +677,19 @@ const handleWebhook = async (req, res) => {
   if (event.type === 'checkout.session.completed') {
     const session = event.data.object;
     const sessionId = session.id;
-    const customerEmail = session.customer_email || session.customer_details?.email;
+    const customerEmail = (session.customer_email || session.customer_details?.email || '').toLowerCase();
     const credits = parseInt(session?.metadata?.credits || '0', 10);
 
+    if (!customerEmail) {
+      console.error('[Stripe] No customer email found in session');
+      return res.status(400).json({ ok: false, error: 'No customer email in session' });
+    }
+
     if (credits > 0) {
-      const result = addCredits(credits, `Achat Stripe (session: ${sessionId})`);
+      const result = addCredits(customerEmail, credits, `Achat Stripe (session: ${sessionId})`);
       
       if (result.ok) {
-        console.log(`💰 Succès Webhook : Crédits ajoutés — Session ID: ${sessionId}, Crédits: ${credits}`);
+        console.log(`💰 Succès Webhook : Crédits ajoutés — Email: ${customerEmail}, Session ID: ${sessionId}, Crédits: ${credits}`);
         
         // Vérification solde Stripe
         try {
@@ -880,8 +909,16 @@ function validateVoice(voiceId) {
 
 // Dub handler function (shared for both routes)
 const handleDubRequest = async (req, res) => {
-  // Get userId early for lock management
-  const userId = req.headers['x-user-id'] || 'anonymous';
+  // Get stableId early for lock management
+  const stableId = getStableId(req);
+  
+  if (!stableId) {
+    return res.status(400).json({
+      ok: false,
+      error: "Missing x-user-email header"
+    });
+  }
+  
   let isLocked = false;
   let lockResolver = null;
   
@@ -907,7 +944,7 @@ const handleDubRequest = async (req, res) => {
     const selectedVoiceModel = voiceValidation.resolved;
     
     // Logs explicites en français
-    console.log(`[DUBBING] Requête reçue — userId: ${userId}`);
+    console.log(`[DUBBING] Requête reçue — stableId: ${stableId}`);
     console.log(`[DUBBING] Langue demandée: ${languageValidation.original || 'non spécifiée'} → résolue: ${selectedLanguageCode} (code court: ${selectedTargetLanguage})`);
     console.log(`[DUBBING] Voix demandée: ${voiceValidation.original || 'non spécifiée'} → résolue: ${selectedVoiceModel}`);
     console.log(`[DUBBING] Fichier: ${req.file.filename} (${(req.file.size / 1024 / 1024).toFixed(2)} MB)`);
@@ -924,21 +961,21 @@ const handleDubRequest = async (req, res) => {
     // ============================================================================
     
     // Wait for any existing lock on this user to be released
-    while (userLocks.has(userId)) {
-      console.log(`🔒 Waiting for lock release for user: ${userId}`);
-      await userLocks.get(userId);
+    while (userLocks.has(stableId)) {
+      console.log(`🔒 Waiting for lock release for user: ${stableId}`);
+      await userLocks.get(stableId);
     }
     
     // Acquire lock for this user
     const lockPromise = new Promise((resolve) => {
       lockResolver = resolve;
     });
-    userLocks.set(userId, lockPromise);
+    userLocks.set(stableId, lockPromise);
     isLocked = true;
     
     try {
       // Vérification initiale des crédits (avec verrouillage actif)
-      const creditsResult = getCredits();
+      const creditsResult = getCredits(stableId);
       if (!creditsResult.ok) {
         return res.status(500).json({
           ok: false,
@@ -946,7 +983,7 @@ const handleDubRequest = async (req, res) => {
         });
       }
       
-      if (!hasEnoughCredits(requiredCredits)) {
+      if (!hasEnoughCredits(stableId, requiredCredits)) {
         console.log(`❌ Insufficient credits: ${creditsResult.credits} < ${requiredCredits}`);
         return res.status(402).json({
           ok: false,
@@ -962,7 +999,7 @@ const handleDubRequest = async (req, res) => {
       // ============================================================================
       // DÉDUCTION DES CRÉDITS AVANT LA GÉNÉRATION (sécurisée avec verrouillage)
       // ============================================================================
-      const deductResult = deductCredits(requiredCredits, `Doublage ${selectedTargetLanguage} (${estimatedDurationSeconds}s)`);
+      const deductResult = deductCredits(stableId, requiredCredits, `Doublage ${selectedTargetLanguage} (${estimatedDurationSeconds}s)`);
       
       if (!deductResult.ok) {
         // Si la déduction échoue (crédits insuffisants), arrêter immédiatement
@@ -979,11 +1016,11 @@ const handleDubRequest = async (req, res) => {
       console.log(`💸 Credits deducted: -${requiredCredits} (new balance: ${deductResult.credits})`);
       
       // Vérification finale juste avant l'appel TTS (double sécurité)
-      const finalCreditsCheck = getCredits();
+      const finalCreditsCheck = getCredits(stableId);
       if (!finalCreditsCheck.ok || finalCreditsCheck.credits < 0) {
         console.error(`❌ Vérification finale échouée: solde invalide`);
         // Remettre les crédits (rollback)
-        addCredits(requiredCredits, `Rollback - échec vérification finale`);
+        addCredits(stableId, requiredCredits, `Rollback - échec vérification finale`);
         return res.status(403).json({
           ok: false,
           error: "CREDIT_VERIFICATION_FAILED",
@@ -1002,7 +1039,7 @@ const handleDubRequest = async (req, res) => {
         const mockAudioUrl = await generateMockDub(req.file, selectedTargetLanguage, jobId);
         
         // Release lock
-        userLocks.delete(userId);
+        userLocks.delete(stableId);
         if (lockResolver) lockResolver();
         isLocked = false;
         
@@ -1021,7 +1058,7 @@ const handleDubRequest = async (req, res) => {
         const mockAudioUrl = await generateMockDub(req.file, selectedTargetLanguage, jobId);
         
         // Release lock
-        userLocks.delete(userId);
+        userLocks.delete(stableId);
         if (lockResolver) lockResolver();
         isLocked = false;
         
@@ -1064,11 +1101,11 @@ const handleDubRequest = async (req, res) => {
         inputName: req.file.originalname
       };
       
-      saveDubbingHistory(userId, historyMetadata);
+      saveDubbingHistory(stableId, historyMetadata);
       console.log(`✅ Historique du doublage enregistré : ${outputFileName} (${creditsUsed} crédits utilisés)`);
 
       // Release lock before sending response
-      userLocks.delete(userId);
+      userLocks.delete(stableId);
       if (lockResolver) lockResolver();
       isLocked = false;
 
@@ -1089,7 +1126,7 @@ const handleDubRequest = async (req, res) => {
     } finally {
       // Ensure lock is always released, even on error
       if (isLocked) {
-        userLocks.delete(userId);
+        userLocks.delete(stableId);
         if (lockResolver) lockResolver();
       }
     }
@@ -1099,7 +1136,7 @@ const handleDubRequest = async (req, res) => {
     
     // Release lock on error
     if (isLocked) {
-      userLocks.delete(userId);
+      userLocks.delete(stableId);
       if (lockResolver) lockResolver();
     }
     
@@ -1304,19 +1341,25 @@ const mockHistory = [
 
 app.get("/api/dubbing/history", (req, res) => {
   try {
-    // Get userId from headers (placeholder for future authentication)
-    const userId = req.headers['x-user-id'] || 'anonymous';
+    const stableId = getStableId(req);
+    
+    if (!stableId) {
+      return res.status(400).json({
+        ok: false,
+        error: 'Missing x-user-email header'
+      });
+    }
     
     // Get dubbing history for the user
-    const history = getDubbingHistory(userId);
+    const history = getDubbingHistory(stableId);
     
-    console.log(`📋 Dubbing history requested for user: ${userId} (${history.length} entries)`);
+    console.log(`📋 Dubbing history requested for user: ${stableId} (${history.length} entries)`);
     
     res.status(200).json({
       ok: true,
       history: history,
       total: history.length,
-      userId: userId
+      userId: stableId
     });
   } catch (error) {
     console.error('❌ Dubbing history error:', error);
@@ -1365,14 +1408,22 @@ app.get("/api/history", (req, res) => {
   }
 });
 
-// Route alias: /history/:userId
+// Route alias: /history/:userId (deprecated - use /api/dubbing/history with x-user-email header)
 app.get("/history/:userId", (req, res) => {
   try {
-    const { userId } = req.params;
+    const stableId = getStableId(req);
+    
+    if (!stableId) {
+      return res.status(400).json({
+        ok: false,
+        error: 'Missing x-user-email header'
+      });
+    }
+    
     const { language, provider, search } = req.query;
     
     // Get dubbing history for the user
-    const userHistory = getDubbingHistory(userId);
+    const userHistory = getDubbingHistory(stableId);
     
     let filtered = [...userHistory];
 
@@ -1391,11 +1442,11 @@ app.get("/history/:userId", (req, res) => {
       );
     }
 
-    console.log(`📋 History requested for user ${userId}: ${filtered.length} entries`);
+    console.log(`📋 History requested for user ${stableId}: ${filtered.length} entries`);
 
     res.json({
       ok: true,
-      userId: userId,
+      userId: stableId,
       history: filtered,
       total: filtered.length
     });
@@ -1436,16 +1487,16 @@ const adminAuth = (req, res, next) => {
   next();
 };
 
-// POST /admin/add-credits - Add credits to a specific user
+// POST /admin/add-credits - Add credits to a specific user (by email)
 app.post('/admin/add-credits', adminAuth, express.json(), (req, res) => {
   try {
     const { userId, credits } = req.body;
     
-    // Validate body
+    // Validate body - userId should be email now
     if (!userId || typeof userId !== 'string' || userId.trim() === '') {
       return res.status(400).json({
         ok: false,
-        error: 'Invalid userId: must be a non-empty string'
+        error: 'Invalid userId: must be a non-empty string (email)'
       });
     }
     
@@ -1453,6 +1504,16 @@ app.post('/admin/add-credits', adminAuth, express.json(), (req, res) => {
       return res.status(400).json({
         ok: false,
         error: 'Invalid credits: must be a positive integer'
+      });
+    }
+    
+    // Convert to stableId (lowercase email)
+    const stableId = userId.toLowerCase().trim();
+    
+    if (!stableId) {
+      return res.status(400).json({
+        ok: false,
+        error: 'Invalid email address'
       });
     }
     
@@ -1480,28 +1541,35 @@ app.post('/admin/add-credits', adminAuth, express.json(), (req, res) => {
       creditsData.users = {};
     }
     
-    // If userId does not exist → create an entry with "credits": 0
-    if (!creditsData.users[userId]) {
-      creditsData.users[userId] = {
+    // Migrate old userId (Clerk ID) to stableId (email) if old data exists
+    if (userId !== stableId && creditsData.users[userId]) {
+      console.log(`🔄 Migrating user data from ${userId} to ${stableId}`);
+      creditsData.users[stableId] = creditsData.users[userId];
+      delete creditsData.users[userId];
+    }
+    
+    // If stableId does not exist → create an entry with "credits": 0
+    if (!creditsData.users[stableId]) {
+      creditsData.users[stableId] = {
         credits: 0,
         history: []
       };
-      console.log(`👤 Created new user entry for ${userId}`);
+      console.log(`👤 Created new user entry for ${stableId}`);
     }
     
     // Get current balance
-    const oldBalance = creditsData.users[userId].credits || 0;
+    const oldBalance = creditsData.users[stableId].credits || 0;
     const newBalance = oldBalance + credits;
     
     // Add credits to user's balance
-    creditsData.users[userId].credits = newBalance;
+    creditsData.users[stableId].credits = newBalance;
     
     // Add to history
-    if (!creditsData.users[userId].history) {
-      creditsData.users[userId].history = [];
+    if (!creditsData.users[stableId].history) {
+      creditsData.users[stableId].history = [];
     }
     
-    creditsData.users[userId].history.push({
+    creditsData.users[stableId].history.push({
       type: 'admin_add',
       amount: credits,
       oldBalance: oldBalance,
@@ -1511,14 +1579,14 @@ app.post('/admin/add-credits', adminAuth, express.json(), (req, res) => {
     });
     
     // Keep only last 100 transactions per user
-    if (creditsData.users[userId].history.length > 100) {
-      creditsData.users[userId].history = creditsData.users[userId].history.slice(-100);
+    if (creditsData.users[stableId].history.length > 100) {
+      creditsData.users[stableId].history = creditsData.users[stableId].history.slice(-100);
     }
     
     // Save credits.json
     try {
       fs.writeFileSync(creditsFilePath, JSON.stringify(creditsData, null, 2));
-      console.log(`✅ Admin added ${credits} credits to user ${userId} (${oldBalance} → ${newBalance})`);
+      console.log(`✅ Admin added ${credits} credits to user ${stableId} (${oldBalance} → ${newBalance})`);
     } catch (error) {
       console.error('❌ Error writing credits.json:', error);
       return res.status(500).json({
@@ -1531,7 +1599,7 @@ app.post('/admin/add-credits', adminAuth, express.json(), (req, res) => {
     res.json({
       ok: true,
       message: 'Credits added successfully',
-      userId: userId,
+      userId: stableId,
       creditsAdded: credits,
       newBalance: newBalance
     });

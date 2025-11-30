@@ -36,31 +36,78 @@ function writeCreditLog(action, amount, newBalance, reason) {
 function initializeCreditsFile() {
   if (!fs.existsSync(CREDITS_FILE)) {
     const initialData = {
-      credits: 10,
-      history: [
-        {
-          type: 'initial',
-          amount: 10,
-          date: new Date().toISOString(),
-          description: 'Crédits initiaux'
-        }
-      ]
+      users: {}
     };
     fs.writeFileSync(CREDITS_FILE, JSON.stringify(initialData, null, 2));
-    console.log('💰 Credits file initialized with 10 credits');
+    console.log('💰 Credits file initialized with users structure');
+  } else {
+    // Migrate old format to new format if needed
+    try {
+      const data = fs.readFileSync(CREDITS_FILE, 'utf8');
+      const parsed = JSON.parse(data);
+      
+      // If old format (has credits at root level), migrate it
+      if (parsed.credits !== undefined && !parsed.users) {
+        console.log('🔄 Migrating old credits format to user-based format');
+        const migratedData = {
+          users: {},
+          _migrated: true,
+          _migrationDate: new Date().toISOString()
+        };
+        fs.writeFileSync(CREDITS_FILE, JSON.stringify(migratedData, null, 2));
+      }
+    } catch (error) {
+      // If file is corrupted, initialize fresh
+      const initialData = { users: {} };
+      fs.writeFileSync(CREDITS_FILE, JSON.stringify(initialData, null, 2));
+    }
   }
 }
 
-// Get current credit balance
-export function getCredits() {
+// Helper function to migrate old userId (Clerk ID) to stableId (email)
+function migrateUserData(creditsData, oldUserId, stableId) {
+  if (oldUserId && oldUserId !== stableId && creditsData.users[oldUserId]) {
+    console.log(`🔄 Migrating user data from ${oldUserId} to ${stableId}`);
+    creditsData.users[stableId] = creditsData.users[oldUserId];
+    delete creditsData.users[oldUserId];
+    return true;
+  }
+  return false;
+}
+
+// Get current credit balance for a user
+export function getCredits(stableId) {
   try {
+    if (!stableId) {
+      return {
+        ok: false,
+        credits: 0,
+        error: 'stableId is required'
+      };
+    }
+
     initializeCreditsFile();
     const data = fs.readFileSync(CREDITS_FILE, 'utf8');
     const parsed = JSON.parse(data);
+    
+    // Ensure users object exists
+    if (!parsed.users) {
+      parsed.users = {};
+    }
+    
+    // Initialize user if doesn't exist
+    if (!parsed.users[stableId]) {
+      parsed.users[stableId] = {
+        credits: 0,
+        history: []
+      };
+      fs.writeFileSync(CREDITS_FILE, JSON.stringify(parsed, null, 2));
+    }
+    
     return {
       ok: true,
-      credits: parsed.credits || 0,
-      history: parsed.history || []
+      credits: parsed.users[stableId].credits || 0,
+      history: parsed.users[stableId].history || []
     };
   } catch (error) {
     console.error('❌ Error reading credits:', error);
@@ -73,18 +120,38 @@ export function getCredits() {
 }
 
 // Add credits (after successful payment)
-export function addCredits(amount, description = 'Achat de crédits') {
+export function addCredits(stableId, amount, description = 'Achat de crédits') {
   try {
+    if (!stableId) {
+      return {
+        ok: false,
+        error: 'stableId is required'
+      };
+    }
+
     initializeCreditsFile();
     const data = fs.readFileSync(CREDITS_FILE, 'utf8');
     const parsed = JSON.parse(data);
     
-    const oldBalance = parsed.credits || 0;
+    // Ensure users object exists
+    if (!parsed.users) {
+      parsed.users = {};
+    }
+    
+    // Initialize user if doesn't exist
+    if (!parsed.users[stableId]) {
+      parsed.users[stableId] = {
+        credits: 0,
+        history: []
+      };
+    }
+    
+    const oldBalance = parsed.users[stableId].credits || 0;
     const newBalance = oldBalance + amount;
     
-    parsed.credits = newBalance;
-    parsed.history = parsed.history || [];
-    parsed.history.push({
+    parsed.users[stableId].credits = newBalance;
+    parsed.users[stableId].history = parsed.users[stableId].history || [];
+    parsed.users[stableId].history.push({
       type: 'add',
       amount: amount,
       oldBalance: oldBalance,
@@ -93,17 +160,17 @@ export function addCredits(amount, description = 'Achat de crédits') {
       description: description
     });
     
-    // Keep only last 100 transactions
-    if (parsed.history.length > 100) {
-      parsed.history = parsed.history.slice(-100);
+    // Keep only last 100 transactions per user
+    if (parsed.users[stableId].history.length > 100) {
+      parsed.users[stableId].history = parsed.users[stableId].history.slice(-100);
     }
     
     fs.writeFileSync(CREDITS_FILE, JSON.stringify(parsed, null, 2));
     
     // Log transaction
-    writeCreditLog('ADD', amount, newBalance, description);
+    writeCreditLog('ADD', amount, newBalance, `${description} (${stableId})`);
     
-    console.log(`💰 Credits added: +${amount} (${oldBalance} → ${newBalance})`);
+    console.log(`💰 Credits added for ${stableId}: +${amount} (${oldBalance} → ${newBalance})`);
     
     return {
       ok: true,
@@ -121,13 +188,35 @@ export function addCredits(amount, description = 'Achat de crédits') {
 }
 
 // Deduct credits (after AI dubbing)
-export function deductCredits(amount, description = 'Génération de doublage') {
+export function deductCredits(stableId, amount, description = 'Génération de doublage') {
   try {
+    if (!stableId) {
+      return {
+        ok: false,
+        credits: 0,
+        error: 'stableId is required',
+        required: amount
+      };
+    }
+
     initializeCreditsFile();
     const data = fs.readFileSync(CREDITS_FILE, 'utf8');
     const parsed = JSON.parse(data);
     
-    const oldBalance = parsed.credits || 0;
+    // Ensure users object exists
+    if (!parsed.users) {
+      parsed.users = {};
+    }
+    
+    // Initialize user if doesn't exist
+    if (!parsed.users[stableId]) {
+      parsed.users[stableId] = {
+        credits: 0,
+        history: []
+      };
+    }
+    
+    const oldBalance = parsed.users[stableId].credits || 0;
     
     if (oldBalance < amount) {
       return {
@@ -140,9 +229,9 @@ export function deductCredits(amount, description = 'Génération de doublage') 
     
     const newBalance = oldBalance - amount;
     
-    parsed.credits = newBalance;
-    parsed.history = parsed.history || [];
-    parsed.history.push({
+    parsed.users[stableId].credits = newBalance;
+    parsed.users[stableId].history = parsed.users[stableId].history || [];
+    parsed.users[stableId].history.push({
       type: 'deduct',
       amount: amount,
       oldBalance: oldBalance,
@@ -151,17 +240,17 @@ export function deductCredits(amount, description = 'Génération de doublage') 
       description: description
     });
     
-    // Keep only last 100 transactions
-    if (parsed.history.length > 100) {
-      parsed.history = parsed.history.slice(-100);
+    // Keep only last 100 transactions per user
+    if (parsed.users[stableId].history.length > 100) {
+      parsed.users[stableId].history = parsed.users[stableId].history.slice(-100);
     }
     
     fs.writeFileSync(CREDITS_FILE, JSON.stringify(parsed, null, 2));
     
     // Log transaction
-    writeCreditLog('DEDUCT', amount, newBalance, description);
+    writeCreditLog('DEDUCT', amount, newBalance, `${description} (${stableId})`);
     
-    console.log(`💸 Credits deducted: -${amount} (${oldBalance} → ${newBalance})`);
+    console.log(`💸 Credits deducted for ${stableId}: -${amount} (${oldBalance} → ${newBalance})`);
     
     return {
       ok: true,
@@ -179,8 +268,11 @@ export function deductCredits(amount, description = 'Génération de doublage') 
 }
 
 // Check if user has enough credits
-export function hasEnoughCredits(required) {
-  const result = getCredits();
+export function hasEnoughCredits(stableId, required) {
+  if (!stableId) {
+    return false;
+  }
+  const result = getCredits(stableId);
   if (!result.ok) {
     return false;
   }
