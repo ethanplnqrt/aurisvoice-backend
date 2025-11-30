@@ -1231,9 +1231,9 @@ async function generateVoicePreview(voiceId) {
     throw new Error('OpenAI API key not configured');
   }
 
-  // Preview text (2-3 seconds)
-  const previewText = 'Hello, welcome to AurisVoice.';
-  const model = 'gpt-4o-mini-tts'; // Same model as main dubbing
+  // Preview text
+  const previewText = 'Preview sample';
+  const model = 'gpt-4o-mini-tts';
 
   console.log(`🔊 [Preview] Generating preview — model: ${model}, voice: ${voiceId}`);
 
@@ -1275,7 +1275,7 @@ app.get('/api/preview-voice', previewLimiter, async (req, res) => {
     if (!voice_id || typeof voice_id !== 'string' || voice_id.trim() === '') {
       return res.status(400).json({
         ok: false,
-        error: 'Missing or invalid voice_id parameter'
+        error: 'Missing voice_id'
       });
     }
 
@@ -1307,8 +1307,6 @@ app.get('/api/preview-voice', previewLimiter, async (req, res) => {
     console.log(`🔄 [Preview] Generating new preview for voice: ${normalizedVoiceId}`);
     
     const hasOpenAI = !!process.env.OPENAI_API_KEY;
-    const creditStatus = await getCreditStatus();
-    const hasSufficientCredit = creditRemaining >= MIN_CREDIT;
 
     if (!hasOpenAI) {
       return res.status(503).json({
@@ -1317,14 +1315,7 @@ app.get('/api/preview-voice', previewLimiter, async (req, res) => {
       });
     }
 
-    if (!hasSufficientCredit) {
-      return res.status(503).json({
-        ok: false,
-        error: 'Insufficient OpenAI credits for preview generation'
-      });
-    }
-
-    // Generate preview audio
+    // Generate preview audio (no credits consumed from user balance)
     const audioBuffer = await generateVoicePreview(normalizedVoiceId);
 
     // Save to cache
